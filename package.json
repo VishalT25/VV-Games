@@ -1,0 +1,22 @@
+{
+  "name": "VV Games",
+  "version": "1.0.0",
+  "description": "Modular multiplayer game platform",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "cd client && npm run build",
+    "start": "node api/index.js",
+    "install-all": "npm install && cd client && npm install"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "cors": "^2.8.5",
+    "uuid": "^9.0.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
+
