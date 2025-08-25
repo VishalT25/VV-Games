@@ -1,2 +1,2 @@
-# OddWord
-Online Hosted Multiplayer Social Deduction Game
+# VV Games
+Online Hosted Multiplayer Games
