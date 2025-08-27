@@ -1,8 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 
 function Notification({ message, type = 'info', duration = 4000, onClose }) {
   const [isVisible, setIsVisible] = useState(true);
   const [isClosing, setIsClosing] = useState(false);
+
+  const handleClose = useCallback(() => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsVisible(false);
+      onClose && onClose();
+    }, 300);
+  }, [onClose]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -10,15 +18,7 @@ function Notification({ message, type = 'info', duration = 4000, onClose }) {
     }, duration);
 
     return () => clearTimeout(timer);
-  }, [duration]);
-
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setIsVisible(false);
-      onClose && onClose();
-    }, 300);
-  };
+  }, [duration, handleClose]);
 
   if (!isVisible) return null;
 

@@ -12,7 +12,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
   const [gamePhase, setGamePhase] = useState('waiting'); // waiting, hint-giving, decision, voting, imposter-guess, finished
   const [playerWord, setPlayerWord] = useState('');
   const [isOddOneOut, setIsOddOneOut] = useState(false);
-  const [knowsRole, setKnowsRole] = useState(true);
+  const [knowsRole, setKnowsRole] = useState(true); // eslint-disable-line no-unused-vars
   const [hints, setHints] = useState([]);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [turnOrder, setTurnOrder] = useState([]);

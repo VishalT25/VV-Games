@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import io from 'socket.io-client';
 import Lobby from './components/Lobby';
 import GameRoom from './components/GameRoom';
@@ -21,7 +21,7 @@ function App() {
   const [isConnecting, setIsConnecting] = useState(true);
   const [notifications, setNotifications] = useState([]);
 
-  const addNotification = (message, type = 'info', duration = 4000) => {
+  const addNotification = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now();
     const notification = { id, message, type, duration };
     setNotifications(prev => [...prev, notification]);
@@ -30,7 +30,7 @@ function App() {
     setTimeout(() => {
       removeNotification(id);
     }, duration);
-  };
+  }, []);
 
   const removeNotification = (id) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
@@ -94,7 +94,7 @@ function App() {
       clearTimeout(connectionTimeout);
       newSocket.close();
     };
-  }, []);
+  }, [addNotification]);
 
   const createRoom = async () => {
     console.log('🚀 createRoom called');
