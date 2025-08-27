@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Lobby from './components/Lobby';
 import GameRoom from './components/GameRoom';
 import Notification from './components/Notification';
@@ -22,9 +22,7 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [playerId, setPlayerId] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
-  
-  // Use ref to store joinRoom function to avoid dependency issues
-  const joinRoomRef = useRef();
+  const [pendingRoomCode, setPendingRoomCode] = useState(null);
 
   const addNotification = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now();
@@ -79,7 +77,7 @@ function App() {
       localStorage.setItem('playerName', playerName.trim());
       
       // Now join the room
-      await joinRoomRef.current(data.roomCode);
+      await joinRoom(data.roomCode);
       
     } catch (error) {
       console.error('❌ Error creating room:', error);
@@ -87,6 +85,33 @@ function App() {
       addNotification(`Failed to create room: ${error.message}`, 'error');
     }
   };
+
+  // Check if we're already in a room from URL
+  const checkRoomAndJoin = useCallback(async (roomCode) => {
+    try {
+      const response = await fetch(`${API_URL}/api/room/${roomCode}/status`);
+      if (response.ok) {
+        const roomStatus = await response.json();
+        console.log('✅ Room found:', roomStatus);
+        
+        // If we have a player name stored, try to join
+        const storedPlayerName = localStorage.getItem('playerName');
+        if (storedPlayerName) {
+          setPlayerName(storedPlayerName);
+          setPendingRoomCode(roomCode); // Set pending room to join
+        } else {
+          // Room exists but no player name, stay in lobby
+          setError(`Room ${roomCode} exists. Please enter your name to join.`);
+        }
+      } else {
+        console.log('❌ Room not found:', roomCode);
+        setError(`Room ${roomCode} not found.`);
+      }
+    } catch (error) {
+      console.error('❌ Error checking room:', error);
+      setError(`Error checking room: ${error.message}`);
+    }
+  }, []); // No dependencies needed
 
   const joinRoom = async (roomCode) => {
     console.log('🎯 joinRoom called with code:', roomCode);
@@ -136,49 +161,61 @@ function App() {
     }
   };
 
-  // Store joinRoom function in ref
-  useEffect(() => {
-    joinRoomRef.current = joinRoom;
-  }, []); // No dependencies needed since we're using ref to avoid circular dependencies
-
-  // Check if we're already in a room from URL
-  const checkRoomAndJoin = useCallback(async (roomCode) => {
-    try {
-      const response = await fetch(`${API_URL}/api/room/${roomCode}/status`);
-      if (response.ok) {
-        const roomStatus = await response.json();
-        console.log('✅ Room found:', roomStatus);
-        
-        // If we have a player name stored, try to join
-        const storedPlayerName = localStorage.getItem('playerName');
-        if (storedPlayerName) {
-          setPlayerName(storedPlayerName);
-          // Instead of calling joinRoom directly, we'll set the state to trigger a re-render
-          // and the useEffect will handle the room joining
-          setError(`Room ${roomCode} exists. Please refresh the page to join.`);
-        } else {
-          // Room exists but no player name, stay in lobby
-          setError(`Room ${roomCode} exists. Please enter your name to join.`);
+  const startRoomPolling = (roomCode) => {
+    // Clear any existing polling
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+    }
+    
+    // Start new polling
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/room/${roomCode}/poll`);
+        if (response.ok) {
+          const roomStatus = await response.json();
+          setRoomData(roomStatus);
         }
-      } else {
-        console.log('❌ Room not found:', roomCode);
-        setError(`Room ${roomCode} not found.`);
+      } catch (error) {
+        console.error('❌ Polling error:', error);
       }
-    } catch (error) {
-      console.error('❌ Error checking room:', error);
-      setError(`Error checking room: ${error.message}`);
-    }
-  }, []); // No dependencies needed
+    }, 2000); // Poll every 2 seconds
+    
+    setPollingInterval(interval);
+  };
 
-  // Handle room joining when player name is available
-  useEffect(() => {
-    const pathParts = window.location.pathname.split('/');
-    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '' && playerName && joinRoomRef.current) {
-      const roomCode = pathParts[1];
-      console.log('🔍 Player name available, joining room:', roomCode);
-      joinRoomRef.current(roomCode);
+  const stopRoomPolling = useCallback(() => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      setPollingInterval(null);
     }
-  }, [playerName]); // Only depends on playerName, not joinRoom
+  }, [pollingInterval]);
+
+  const leaveRoom = () => {
+    // Stop polling
+    stopRoomPolling();
+    
+    // Clear room data
+    setRoomData(null);
+    setPlayerId(null);
+    setGameState('lobby');
+    
+    // Update URL back to root
+    window.history.pushState({}, '', '/');
+    
+    // Clear error
+    setError('');
+    
+    addNotification('Left the room', 'info');
+  };
+
+  // Handle room joining when player name is available and there's a pending room
+  useEffect(() => {
+    if (pendingRoomCode && playerName) {
+      console.log('🔍 Player name available, joining pending room:', pendingRoomCode);
+      joinRoom(pendingRoomCode);
+      setPendingRoomCode(null); // Clear pending room
+    }
+  }, [pendingRoomCode, playerName]);
 
   useEffect(() => {
     const pathParts = window.location.pathname.split('/');
@@ -246,59 +283,12 @@ function App() {
     checkBackendHealth();
   }, [addNotification]);
 
-  const startRoomPolling = (roomCode) => {
-    // Clear any existing polling
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-    }
-    
-    // Start new polling
-    const interval = setInterval(async () => {
-      try {
-        const response = await fetch(`${API_URL}/api/room/${roomCode}/poll`);
-        if (response.ok) {
-          const roomStatus = await response.json();
-          setRoomData(roomStatus);
-        }
-      } catch (error) {
-        console.error('❌ Polling error:', error);
-      }
-    }, 2000); // Poll every 2 seconds
-    
-    setPollingInterval(interval);
-  };
-
-  const stopRoomPolling = useCallback(() => {
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-      setPollingInterval(null);
-    }
-  }, [pollingInterval]);
-
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
       stopRoomPolling();
     };
   }, [stopRoomPolling]);
-
-  const leaveRoom = () => {
-    // Stop polling
-    stopRoomPolling();
-    
-    // Clear room data
-    setRoomData(null);
-    setPlayerId(null);
-    setGameState('lobby');
-    
-    // Update URL back to root
-    window.history.pushState({}, '', '/');
-    
-    // Clear error
-    setError('');
-    
-    addNotification('Left the room', 'info');
-  };
 
   return (
     <div className="App">
