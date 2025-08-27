@@ -131,7 +131,7 @@ io.on('connection', (socket) => {
     console.log(`🎉 ${playerName} successfully joined room ${roomCode}. Total players: ${room.players.length}`);
   });
 
-  socket.on('start-game', () => {
+  socket.on('start-game', (gameSettings = {}) => {
     console.log(`🎮 Start game request from socket ${socket.id} in room ${socket.roomCode}`);
 
     if (!socket.roomCode) {
@@ -174,11 +174,23 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Initialize game settings with defaults
+    const settings = {
+      timerDuration: gameSettings.timerDuration || 30000, // 30 seconds default
+      imposterKnowsRole: gameSettings.imposterKnowsRole !== undefined ? gameSettings.imposterKnowsRole : false,
+      playerOrder: gameSettings.playerOrder || 'random', // 'random' or 'host-set'
+      customOrder: gameSettings.customOrder || null
+    };
+
     // Start the game
     console.log(`🎮 Starting game in room ${socket.roomCode} with ${room.players.length} players`);
 
-    // Simple word assignment for OddWord game
-    const words = ['apple', 'banana', 'carrot', 'dog', 'elephant', 'flower', 'guitar', 'house'];
+    // Expanded word list for better gameplay
+    const words = [
+      'apple', 'banana', 'carrot', 'dog', 'elephant', 'flower', 'guitar', 'house',
+      'ocean', 'mountain', 'forest', 'city', 'book', 'music', 'painting', 'dance',
+      'coffee', 'pizza', 'chocolate', 'ice cream', 'rain', 'sunshine', 'snow', 'wind'
+    ];
     const selectedWord = words[Math.floor(Math.random() * words.length)];
     let differentWord = words[Math.floor(Math.random() * words.length)];
     
@@ -187,30 +199,63 @@ io.on('connection', (socket) => {
       differentWord = words[Math.floor(Math.random() * words.length)];
     }
 
+    // Determine player order
+    let turnOrder;
+    if (settings.playerOrder === 'host-set' && settings.customOrder) {
+      turnOrder = settings.customOrder;
+    } else {
+      // Random order
+      turnOrder = [...Array(room.players.length).keys()];
+      for (let i = turnOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [turnOrder[i], turnOrder[j]] = [turnOrder[j], turnOrder[i]];
+      }
+    }
+
     // Randomly assign one player as the "odd one out"
     const oddOneOutIndex = Math.floor(Math.random() * room.players.length);
     const oddOneOutPlayer = room.players[oddOneOutIndex];
 
     console.log(`🎯 Word assignment: Normal="${selectedWord}", Odd="${differentWord}"`);
     console.log(`🎭 Odd one out: ${oddOneOutPlayer.name} (index ${oddOneOutIndex})`);
+    console.log(`🔄 Turn order: ${turnOrder.map(i => room.players[i].name).join(', ')}`);
+
+    // Initialize game state
+    room.gameState = 'hint-giving';
+    room.gameData = {
+      normalWord: selectedWord,
+      oddWord: differentWord,
+      oddOneOutIndex: oddOneOutIndex,
+      turnOrder: turnOrder,
+      currentTurnIndex: 0,
+      hints: [],
+      hintsGiven: 0,
+      settings: settings,
+      votes: {},
+      gamePhase: 'hint-giving'
+    };
 
     room.players.forEach((player, index) => {
       const isOddOneOut = index === oddOneOutIndex;
       const word = isOddOneOut ? differentWord : selectedWord;
+      const knowsRole = settings.imposterKnowsRole || !isOddOneOut;
 
-      console.log(`📤 Sending to ${player.name}: word="${word}", isOdd=${isOddOneOut}`);
+      console.log(`📤 Sending to ${player.name}: word="${word}", isOdd=${isOddOneOut}, knowsRole=${knowsRole}`);
 
       io.to(player.id).emit('game-started', {
         word: word,
         isOddOneOut: isOddOneOut,
-        timer: 30000, // 30 seconds in milliseconds
-        currentTurn: 0, // Start with first player
-        players: room.players // Send the full players list
+        knowsRole: knowsRole,
+        timer: settings.timerDuration,
+        currentTurnIndex: 0,
+        turnOrder: turnOrder.map(i => room.players[i].name),
+        players: room.players,
+        settings: settings,
+        roomCode: socket.roomCode
       });
     });
 
-    room.gameState = 'playing';
-    console.log(`✅ Game started in room ${socket.roomCode}, state updated to 'playing'`);
+    console.log(`✅ Game started in room ${socket.roomCode}, state updated to 'hint-giving'`);
   });
 
   socket.on('give-hint', ({ hint }) => {
@@ -222,20 +267,66 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (!room.gameData || room.gameData.gamePhase !== 'hint-giving') {
+      socket.emit('error', { message: 'Not currently in hint-giving phase' });
+      return;
+    }
+
     const player = room.players.find(p => p.id === socket.id);
     if (!player) {
       socket.emit('error', { message: 'Player not found' });
       return;
     }
 
-    // Broadcast hint to all players in the room
-    io.to(socket.roomCode).emit('hint-given', {
+    // Check if it's the player's turn
+    const currentPlayerIndex = room.gameData.turnOrder[room.gameData.currentTurnIndex];
+    const currentPlayer = room.players[currentPlayerIndex];
+    
+    if (currentPlayer.id !== socket.id) {
+      socket.emit('error', { message: "It's not your turn" });
+      return;
+    }
+
+    // Add hint to game data
+    const hintData = {
       playerName: player.name,
       hint: hint,
-      playerId: socket.id
-    });
+      playerId: socket.id,
+      playerIndex: room.gameData.currentTurnIndex,
+      timestamp: Date.now()
+    };
 
-    console.log(`✅ Hint broadcasted to room ${socket.roomCode}`);
+    room.gameData.hints.push(hintData);
+    room.gameData.hintsGiven++;
+
+    // Broadcast hint to all players
+    io.to(socket.roomCode).emit('hint-given', hintData);
+
+    // Move to next turn
+    room.gameData.currentTurnIndex++;
+
+    if (room.gameData.currentTurnIndex >= room.players.length) {
+      // All players have given hints, transition to decision phase
+      io.to(socket.roomCode).emit('all-hints-given', {
+        hints: room.gameData.hints,
+        roundNumber: 1
+      });
+      
+      room.gameData.gamePhase = 'decision';
+      console.log(`✅ All hints given in room ${socket.roomCode}, transitioning to decision phase`);
+    } else {
+      // Move to next player's turn
+      const nextPlayerIndex = room.gameData.turnOrder[room.gameData.currentTurnIndex];
+      const nextPlayer = room.players[nextPlayerIndex];
+      
+      io.to(socket.roomCode).emit('next-turn', {
+        currentTurnIndex: room.gameData.currentTurnIndex,
+        currentPlayer: nextPlayer,
+        timer: room.gameData.settings.timerDuration
+      });
+      
+      console.log(`✅ Next turn: ${nextPlayer.name} in room ${socket.roomCode}`);
+    }
   });
 
   socket.on('kick-player', ({ playerId }) => {
@@ -281,6 +372,174 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Decision phase: host decides to continue hints or start voting
+  socket.on('decision-continue-hints', () => {
+    const room = rooms.get(socket.roomCode);
+    if (!room || !room.gameData) return;
+
+    const requestingPlayer = room.players.find(p => p.id === socket.id);
+    if (!requestingPlayer || !requestingPlayer.isHost) {
+      socket.emit('error', { message: 'Only the host can make this decision' });
+      return;
+    }
+
+    // Reset turn order for another round
+    room.gameData.currentTurnIndex = 0;
+    room.gameData.gamePhase = 'hint-giving';
+
+    const firstPlayerIndex = room.gameData.turnOrder[0];
+    const firstPlayer = room.players[firstPlayerIndex];
+
+    io.to(socket.roomCode).emit('continue-hints', {
+      currentTurnIndex: 0,
+      currentPlayer: firstPlayer,
+      timer: room.gameData.settings.timerDuration,
+      roundNumber: Math.floor(room.gameData.hintsGiven / room.players.length) + 1
+    });
+
+    console.log(`🔄 Host decided to continue hints in room ${socket.roomCode}`);
+  });
+
+  socket.on('decision-start-voting', () => {
+    const room = rooms.get(socket.roomCode);
+    if (!room || !room.gameData) return;
+
+    const requestingPlayer = room.players.find(p => p.id === socket.id);
+    if (!requestingPlayer || !requestingPlayer.isHost) {
+      socket.emit('error', { message: 'Only the host can make this decision' });
+      return;
+    }
+
+    room.gameData.gamePhase = 'voting';
+    room.gameData.votes = {};
+
+    io.to(socket.roomCode).emit('voting-phase-start', {
+      timer: 60000, // 1 minute for voting
+      hints: room.gameData.hints
+    });
+
+    console.log(`🗳️ Voting phase started in room ${socket.roomCode}`);
+  });
+
+  // Voting system
+  socket.on('cast-vote', ({ votedPlayerId }) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room || !room.gameData || room.gameData.gamePhase !== 'voting') return;
+
+    const voter = room.players.find(p => p.id === socket.id);
+    if (!voter) return;
+
+    room.gameData.votes[socket.id] = votedPlayerId;
+
+    io.to(socket.roomCode).emit('vote-cast', {
+      votes: room.gameData.votes,
+      voterName: voter.name
+    });
+
+    // Check if all players have voted
+    if (Object.keys(room.gameData.votes).length === room.players.length) {
+      processVotingResults(room, socket.roomCode);
+    }
+
+    console.log(`🗳️ Vote cast by ${voter.name} in room ${socket.roomCode}`);
+  });
+
+  // Imposter guess system
+  socket.on('imposter-guess', ({ guess }) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room || !room.gameData || room.gameData.gamePhase !== 'imposter-guess') return;
+
+    const guessingPlayer = room.players.find(p => p.id === socket.id);
+    const imposterIndex = room.gameData.oddOneOutIndex;
+    
+    if (!guessingPlayer || room.players.indexOf(guessingPlayer) !== imposterIndex) {
+      socket.emit('error', { message: 'Only the imposter can make a guess' });
+      return;
+    }
+
+    const correctGuess = guess.toLowerCase().trim() === room.gameData.normalWord.toLowerCase();
+    
+    io.to(socket.roomCode).emit('game-ended', {
+      winner: correctGuess ? 'imposter' : 'majority',
+      reason: correctGuess ? 'imposter-correct-guess' : 'imposter-wrong-guess',
+      imposterName: guessingPlayer.name,
+      imposterGuess: guess,
+      correctWord: room.gameData.normalWord,
+      oddWord: room.gameData.oddWord,
+      allHints: room.gameData.hints
+    });
+
+    room.gameState = 'finished';
+    console.log(`🎯 Imposter ${guessingPlayer.name} guessed "${guess}" - ${correctGuess ? 'CORRECT' : 'WRONG'}`);
+  });
+
+  // Host controls
+  socket.on('transfer-host', ({ newHostId }) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room) return;
+
+    const currentHost = room.players.find(p => p.id === socket.id);
+    const newHost = room.players.find(p => p.id === newHostId);
+    
+    if (!currentHost || !currentHost.isHost || !newHost) {
+      socket.emit('error', { message: 'Invalid host transfer' });
+      return;
+    }
+
+    currentHost.isHost = false;
+    newHost.isHost = true;
+
+    io.to(socket.roomCode).emit('host-transferred', {
+      newHostName: newHost.name,
+      players: room.players
+    });
+
+    console.log(`👑 Host transferred from ${currentHost.name} to ${newHost.name} in room ${socket.roomCode}`);
+  });
+
+  socket.on('update-game-settings', ({ settings }) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room) return;
+
+    const requestingPlayer = room.players.find(p => p.id === socket.id);
+    if (!requestingPlayer || !requestingPlayer.isHost) {
+      socket.emit('error', { message: 'Only the host can update settings' });
+      return;
+    }
+
+    // Update room settings (only if game hasn't started)
+    if (room.gameState === 'waiting') {
+      room.gameSettings = { ...room.gameSettings, ...settings };
+      
+      io.to(socket.roomCode).emit('settings-updated', {
+        settings: room.gameSettings
+      });
+
+      console.log(`⚙️ Game settings updated in room ${socket.roomCode}:`, settings);
+    }
+  });
+
+  socket.on('set-player-order', ({ customOrder }) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room) return;
+
+    const requestingPlayer = room.players.find(p => p.id === socket.id);
+    if (!requestingPlayer || !requestingPlayer.isHost) {
+      socket.emit('error', { message: 'Only the host can set player order' });
+      return;
+    }
+
+    if (room.gameState === 'waiting') {
+      room.customPlayerOrder = customOrder;
+      
+      io.to(socket.roomCode).emit('player-order-set', {
+        customOrder: customOrder
+      });
+
+      console.log(`🔄 Custom player order set in room ${socket.roomCode}:`, customOrder);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('🔌 User disconnected:', socket.id);
     console.log('📊 Total connections:', io.engine.clientsCount);
@@ -315,6 +574,67 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+// Helper function to process voting results
+function processVotingResults(room, roomCode) {
+  const votes = room.gameData.votes;
+  const voteCounts = {};
+  
+  // Count votes
+  Object.values(votes).forEach(votedPlayerId => {
+    voteCounts[votedPlayerId] = (voteCounts[votedPlayerId] || 0) + 1;
+  });
+  
+  // Find the player with most votes
+  let maxVotes = 0;
+  let votedOutPlayerId = null;
+  
+  Object.entries(voteCounts).forEach(([playerId, count]) => {
+    if (count > maxVotes) {
+      maxVotes = count;
+      votedOutPlayerId = playerId;
+    }
+  });
+  
+  const votedOutPlayer = room.players.find(p => p.id === votedOutPlayerId);
+  const imposterIndex = room.gameData.oddOneOutIndex;
+  const imposter = room.players[imposterIndex];
+  const isImposterVotedOut = votedOutPlayer && room.players.indexOf(votedOutPlayer) === imposterIndex;
+  
+  if (isImposterVotedOut) {
+    // Imposter was voted out - give them a chance to guess the word
+    room.gameData.gamePhase = 'imposter-guess';
+    
+    io.to(roomCode).emit('imposter-voted-out', {
+      votedOutPlayer: votedOutPlayer.name,
+      isImposter: true,
+      voteCounts: voteCounts
+    });
+    
+    // Send imposter guess prompt only to the imposter
+    io.to(imposter.id).emit('imposter-guess-prompt', {
+      normalWord: room.gameData.normalWord, // They need to guess this
+      timeLimit: 30000 // 30 seconds to guess
+    });
+    
+  } else {
+    // Wrong person voted out - imposter wins
+    io.to(roomCode).emit('game-ended', {
+      winner: 'imposter',
+      reason: 'wrong-person-voted',
+      votedOutPlayer: votedOutPlayer?.name || 'No one',
+      imposterName: imposter.name,
+      correctWord: room.gameData.normalWord,
+      oddWord: room.gameData.oddWord,
+      allHints: room.gameData.hints,
+      voteCounts: voteCounts
+    });
+    
+    room.gameState = 'finished';
+  }
+  
+  console.log(`🗳️ Voting results in room ${roomCode}: ${votedOutPlayer?.name || 'No one'} voted out (Imposter: ${isImposterVotedOut})`);
+}
 
 // Catch all handler
 app.get('*', (req, res) => {

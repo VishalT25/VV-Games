@@ -99,7 +99,7 @@ function Lobby({ playerName, setPlayerName, createRoom, joinRoom, error, setErro
               <input
                 id="roomCode"
                 type="text"
-                placeholder="Enter room code"
+                placeholder="ABC123"
                 value={roomCode}
                 onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                 maxLength={6}
@@ -123,7 +123,7 @@ function Lobby({ playerName, setPlayerName, createRoom, joinRoom, error, setErro
 
         {/* Footer */}
         <div className="lobby-footer">
-          <p>Made with ❤️ by VV Games</p>
+          <p>Created by <a href="https://github.com/VishalT25" target="_blank" rel="noopener noreferrer">Vishal</a> & <a href="https://github.com/varshannnn" target="_blank" rel="noopener noreferrer">Varshan</a></p>
         </div>
       </div>
     </div>

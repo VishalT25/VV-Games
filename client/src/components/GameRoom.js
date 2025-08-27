@@ -9,11 +9,13 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
     gamePhase: 'waiting'
   });
   
-  const [gamePhase, setGamePhase] = useState('waiting'); // waiting, game-selection, hint-giving, voting, finished
+  const [gamePhase, setGamePhase] = useState('waiting'); // waiting, hint-giving, decision, voting, imposter-guess, finished
   const [playerWord, setPlayerWord] = useState('');
   const [isOddOneOut, setIsOddOneOut] = useState(false);
+  const [knowsRole, setKnowsRole] = useState(true);
   const [hints, setHints] = useState([]);
-  const [currentTurn, setCurrentTurn] = useState(0);
+  const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
+  const [turnOrder, setTurnOrder] = useState([]);
   const [timer, setTimer] = useState(0);
   const [hint, setHint] = useState('');
   const [gameResults, setGameResults] = useState(null);
@@ -22,6 +24,25 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
   const [selectedGame, setSelectedGame] = useState('oddword');
   const [showRules, setShowRules] = useState(false);
   const [showGameDropdown, setShowGameDropdown] = useState(false);
+  const [gameSettings, setGameSettings] = useState({
+    timerDuration: 30000,
+    imposterKnowsRole: false,
+    playerOrder: 'random'
+  });
+  
+  // Ensure gameSettings is never undefined
+  const safeGameSettings = gameSettings || {
+    timerDuration: 30000,
+    imposterKnowsRole: false,
+    playerOrder: 'random'
+  };
+  const [showHostControls, setShowHostControls] = useState(false);
+  const [roundNumber, setRoundNumber] = useState(1);
+  const [imposterGuess, setImposterGuess] = useState('');
+  const [pendingSettings, setPendingSettings] = useState(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [customPlayerOrder, setCustomPlayerOrder] = useState([]);
+  const [draggedPlayer, setDraggedPlayer] = useState(null);
 
   const games = [
     {
@@ -70,20 +91,57 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
 
     socket.on('game-started', (data) => {
       console.log('🎉 Game started event received:', data);
+      console.log('📝 Word data:', data.word);
+      console.log('🎭 Is odd one out:', data.isOddOneOut);
+      console.log('👁️ Knows role:', data.knowsRole);
+      console.log('🔄 Turn order:', data.turnOrder);
+      console.log('🔄 Turn order length:', data.turnOrder?.length);
+      
       setPlayerWord(data.word);
       setIsOddOneOut(data.isOddOneOut);
-      setGamePhase('hint-giving');
+      setKnowsRole(data.knowsRole);
       setTimer(data.timer);
+      setCurrentTurnIndex(data.currentTurnIndex);
+      setTurnOrder(data.turnOrder);
+      setGameSettings(data.settings);
+      setRoundNumber(1);
+      setHints([]); // Reset hints for new game
+      
+      // Small delay to ensure all state is properly set before showing game
+      setTimeout(() => {
+        setGamePhase('hint-giving');
+      }, 100);
+      
       console.log('✅ Game phase set to hint-giving');
+      console.log('✅ Player word set to:', data.word);
+      console.log('✅ Turn order set to:', data.turnOrder);
     });
 
     socket.on('hint-given', (data) => {
       setHints(prev => [...prev, {
         playerName: data.playerName,
         hint: data.hint,
-        playerId: data.playerId
+        playerId: data.playerId,
+        playerIndex: data.playerIndex,
+        timestamp: data.timestamp
       }]);
-      setCurrentTurn(data.currentTurn);
+    });
+
+    socket.on('next-turn', (data) => {
+      setCurrentTurnIndex(data.currentTurnIndex);
+      setTimer(data.timer);
+    });
+
+    socket.on('all-hints-given', (data) => {
+      setGamePhase('decision');
+      setRoundNumber(data.roundNumber);
+    });
+
+    socket.on('continue-hints', (data) => {
+      setGamePhase('hint-giving');
+      setCurrentTurnIndex(data.currentTurnIndex);
+      setTimer(data.timer);
+      setRoundNumber(data.roundNumber);
     });
 
     socket.on('voting-phase-start', (data) => {
@@ -91,9 +149,26 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
       setTimer(data.timer);
     });
 
+    socket.on('imposter-voted-out', (data) => {
+      setGameResults(data);
+      setGamePhase('imposter-guess');
+    });
+
+    socket.on('imposter-guess-prompt', (data) => {
+      setTimer(data.timeLimit);
+    });
+
     socket.on('game-ended', (data) => {
       setGameResults(data);
       setGamePhase('finished');
+    });
+
+    socket.on('host-transferred', (data) => {
+      setRoomData(prev => ({ ...prev, players: data.players }));
+    });
+
+    socket.on('settings-updated', (data) => {
+      setGameSettings(data.settings);
     });
 
     return () => {
@@ -102,8 +177,15 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
       socket.off('kicked');
       socket.off('game-started');
       socket.off('hint-given');
+      socket.off('next-turn');
+      socket.off('all-hints-given');
+      socket.off('continue-hints');
       socket.off('voting-phase-start');
+      socket.off('imposter-voted-out');
+      socket.off('imposter-guess-prompt');
       socket.off('game-ended');
+      socket.off('host-transferred');
+      socket.off('settings-updated');
     };
   }, [socket, setRoomData, setGameState]);
 
@@ -129,12 +211,26 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
     }
     
     if (roomData?.players?.length < 3) {
-      console.error('❌ Not enough players:', roomData.players.length);
+      console.error('❌ Not enough players:', roomData?.players?.length || 0);
       return;
     }
     
-    console.log('📡 Emitting start-game event');
-    socket.emit('start-game');
+    const currentSettings = getCurrentSettings();
+    let finalSettings = { ...currentSettings };
+    
+    if (currentSettings.playerOrder === 'host-set' && customPlayerOrder.length > 0 && roomData?.players && Array.isArray(roomData.players)) {
+      // Convert player IDs to player indices for the backend
+      const playerIndices = customPlayerOrder.map(playerId => {
+        const playerIndex = roomData.players.findIndex(p => p.id === playerId);
+        return playerIndex;
+      });
+      finalSettings.customOrder = playerIndices;
+    } else {
+      finalSettings.customOrder = null;
+    }
+    
+    console.log('📡 Emitting start-game event with settings:', finalSettings);
+    socket.emit('start-game', finalSettings);
   };
 
   const giveHint = (e) => {
@@ -153,7 +249,118 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
   };
 
   const isMyTurn = () => {
-    return roomData.players[currentTurn]?.id === socket.id;
+    if (!Array.isArray(turnOrder) || !turnOrder.length || currentTurnIndex >= turnOrder.length || !roomData?.players) {
+      console.log('❌ isMyTurn check failed:', { 
+        turnOrderLength: turnOrder?.length, 
+        currentTurnIndex, 
+        playersCount: roomData?.players?.length 
+      });
+      return false;
+    }
+    const currentPlayerName = turnOrder[currentTurnIndex];
+    const currentPlayer = roomData.players.find(p => p.name === currentPlayerName);
+    const isMyTurn = currentPlayer?.id === socket.id;
+    console.log('🎯 Turn check:', { 
+      currentPlayerName, 
+      currentPlayerId: currentPlayer?.id, 
+      myId: socket.id, 
+      isMyTurn 
+    });
+    return isMyTurn;
+  };
+
+  const getCurrentPlayer = () => {
+    if (!Array.isArray(turnOrder) || !turnOrder.length || currentTurnIndex >= turnOrder.length || !roomData?.players) return null;
+    const currentPlayerName = turnOrder[currentTurnIndex];
+    return roomData.players.find(p => p.name === currentPlayerName);
+  };
+
+  const continueHints = () => {
+    socket.emit('decision-continue-hints');
+  };
+
+  const startVoting = () => {
+    socket.emit('decision-start-voting');
+  };
+
+  const submitImposterGuess = (e) => {
+    e.preventDefault();
+    if (!imposterGuess.trim()) return;
+    socket.emit('imposter-guess', { guess: imposterGuess.trim() });
+    setImposterGuess('');
+  };
+
+  const transferHost = (newHostId) => {
+    socket.emit('transfer-host', { newHostId });
+  };
+
+  const updatePendingSettings = (newSettings) => {
+    const updatedPending = { ...safeGameSettings, ...pendingSettings, ...newSettings };
+    setPendingSettings(updatedPending);
+    setHasUnsavedChanges(true);
+  };
+
+  const saveSettings = () => {
+    if (pendingSettings) {
+      setGameSettings(pendingSettings);
+      socket.emit('update-game-settings', { settings: pendingSettings });
+      setPendingSettings(null);
+      setHasUnsavedChanges(false);
+    }
+  };
+
+  const discardChanges = () => {
+    setPendingSettings(null);
+    setHasUnsavedChanges(false);
+  };
+
+  const getCurrentSettings = () => {
+    return pendingSettings || safeGameSettings;
+  };
+
+  // Initialize custom player order when players change
+  useEffect(() => {
+    if (roomData?.players && Array.isArray(roomData.players) && customPlayerOrder.length === 0) {
+      setCustomPlayerOrder(roomData.players.map(p => p.id));
+    }
+  }, [roomData?.players, customPlayerOrder.length]);
+
+  // Drag and drop functions
+  const handleDragStart = (e, playerId) => {
+    setDraggedPlayer(playerId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e, targetPlayerId) => {
+    e.preventDefault();
+    if (draggedPlayer && draggedPlayer !== targetPlayerId && roomData?.players && Array.isArray(roomData.players)) {
+      const newOrder = [...customPlayerOrder];
+      const draggedIndex = newOrder.indexOf(draggedPlayer);
+      const targetIndex = newOrder.indexOf(targetPlayerId);
+      
+      // Remove dragged item
+      newOrder.splice(draggedIndex, 1);
+      // Insert at new position
+      newOrder.splice(targetIndex, 0, draggedPlayer);
+      
+      setCustomPlayerOrder(newOrder);
+      // Convert player IDs to player indices for the backend
+      const playerIndices = newOrder.map(playerId => {
+        const playerIndex = roomData.players.findIndex(p => p.id === playerId);
+        return playerIndex;
+      });
+      socket.emit('set-player-order', { customOrder: playerIndices });
+    }
+    setDraggedPlayer(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedPlayer(null);
   };
 
   const leaveRoom = () => {
@@ -191,6 +398,104 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
         timer={timer}
         formatTime={formatTime}
       />
+    );
+  }
+
+  // Decision Phase - Host decides to continue hints or start voting
+  if (gamePhase === 'decision') {
+    return (
+      <div className="game-room">
+        <div className="decision-phase">
+          <div className="decision-header animate-fade-in-down">
+            <h2>🤔 Decision Time!</h2>
+            <p className="decision-subtitle">Round {roundNumber} complete. What's next?</p>
+          </div>
+
+          <div className="hints-summary animate-fade-in-up">
+            <h3>Hints Given This Round:</h3>
+            <div className="hints-list">
+              {hints && roomData?.players && hints.slice(-roomData.players.length).map((hint, index) => (
+                <div key={index} className="hint-item">
+                  <strong>{hint.playerName}:</strong> "{hint.hint}"
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {roomData?.isHost ? (
+            <div className="decision-actions animate-fade-in-up">
+              <button onClick={continueHints} className="btn btn-secondary">
+                <span className="btn-icon">🔄</span>
+                Continue Hints (Round {roundNumber + 1})
+              </button>
+              <button onClick={startVoting} className="btn btn-primary">
+                <span className="btn-icon">🗳️</span>
+                Start Voting
+              </button>
+            </div>
+          ) : (
+            <div className="waiting-host animate-fade-in-up">
+              <p>Waiting for host to decide...</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Imposter Guess Phase
+  if (gamePhase === 'imposter-guess') {
+    const isImposter = isOddOneOut;
+    
+    return (
+      <div className="game-room">
+        <div className="imposter-guess-phase">
+          <div className="guess-header animate-fade-in-down">
+            <h2>🎯 Final Chance!</h2>
+            {gameResults && (
+              <p className="guess-subtitle">
+                {gameResults.votedOutPlayer} was voted out and is the imposter!
+              </p>
+            )}
+          </div>
+
+          {timer > 0 && (
+            <div className="timer animate-fade-in-up">
+              <div className="timer-icon">⏰</div>
+              <div className="timer-text">
+                <span className="timer-label">Time Remaining</span>
+                <span className="timer-value">{formatTime(timer)}</span>
+              </div>
+            </div>
+          )}
+
+          {isImposter ? (
+            <div className="imposter-guess-form animate-fade-in-up">
+              <p className="guess-instruction">
+                You've been caught! Guess the majority's word to win:
+              </p>
+              <form onSubmit={submitImposterGuess} className="guess-form">
+                <input
+                  type="text"
+                  placeholder="Enter your guess..."
+                  value={imposterGuess}
+                  onChange={(e) => setImposterGuess(e.target.value)}
+                  className="guess-input"
+                  autoFocus
+                />
+                <button type="submit" className="btn btn-primary" disabled={!imposterGuess.trim()}>
+                  <span className="btn-icon">🎯</span>
+                  Submit Guess
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="waiting-imposter animate-fade-in-up">
+              <p>Waiting for the imposter to make their final guess...</p>
+            </div>
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -258,11 +563,11 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
               <div className="players-header">
                 <h3>👥 Players</h3>
                 <div className="player-count-badge">
-                  {roomData.players.length}/8
+                  {roomData?.players?.length || 0}/8
                 </div>
               </div>
               <div className="players-grid">
-                {roomData.players.map((player, index) => (
+                {roomData?.players?.map((player, index) => (
                   <div
                     key={player.id}
                     className={`player-card ${player.id === socket.id ? 'you' : ''} ${
@@ -270,7 +575,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
                     }`}
                   >
                     {/* Player Controls (only visible to host) */}
-                    {roomData.isHost && player.id !== socket.id && (
+                    {roomData?.isHost && player.id !== socket.id && (
                       <div className="player-controls">
                         <button
                           className="player-control-btn kick-btn"
@@ -299,6 +604,39 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
                   </div>
                 ))}
               </div>
+
+              {/* Player Order Configuration */}
+              {roomData?.isHost && getCurrentSettings().playerOrder === 'host-set' && roomData?.players && Array.isArray(roomData.players) && (
+                <div className="player-order-config">
+                  <h4>🎯 Set Turn Order</h4>
+                  <p className="order-instruction">Drag players to reorder the turn sequence:</p>
+                  <div className="draggable-players">
+                    {customPlayerOrder.map((playerId, index) => {
+                      const player = roomData.players.find(p => p.id === playerId);
+                      if (!player) return null;
+                      
+                      return (
+                        <div
+                          key={playerId}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, playerId)}
+                          onDragOver={handleDragOver}
+                          onDrop={(e) => handleDrop(e, playerId)}
+                          onDragEnd={handleDragEnd}
+                          className={`draggable-player ${draggedPlayer === playerId ? 'dragging' : ''}`}
+                        >
+                          <div className="order-number">{index + 1}</div>
+                          <div className="player-avatar-small">
+                            {player.isHost ? '👑' : '👤'}
+                          </div>
+                          <div className="player-name-small">{player.name}</div>
+                          <div className="drag-handle">⋮⋮</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -316,11 +654,97 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
       )}
 
       {/* Host Controls */}
-      {roomData.isHost && gamePhase === 'waiting' && (
+      {roomData?.isHost && gamePhase === 'waiting' && (
         <div className="host-controls animate-fade-in-up">
-          <h4>👑 Host Controls</h4>
+          <div className="host-header">
+            <h4>👑 Host Controls</h4>
+            <div className="header-actions">
+              {hasUnsavedChanges && (
+                <button 
+                  onClick={saveSettings}
+                  className="save-settings-square-btn"
+                  title="Save Settings"
+                >
+                  💾
+                </button>
+              )}
+              <button 
+                onClick={() => setShowHostControls(!showHostControls)}
+                className="toggle-controls-btn"
+              >
+                {showHostControls ? '⬆️' : '⬇️'} {showHostControls ? 'Hide' : 'Show'} Settings
+              </button>
+            </div>
+          </div>
+
+          {showHostControls && (
+            <div className="host-settings">
+              {hasUnsavedChanges && (
+                <div className="unsaved-changes-warning">
+                  <span className="warning-icon">⚠️</span>
+                  <span>You have unsaved changes</span>
+                </div>
+              )}
+
+              <div className="setting-group">
+                <label>Timer Duration (seconds):</label>
+                <select 
+                  value={getCurrentSettings().timerDuration / 1000}
+                  onChange={(e) => updatePendingSettings({ timerDuration: parseInt(e.target.value) * 1000 })}
+                >
+                  <option value={15}>15 seconds</option>
+                  <option value={30}>30 seconds</option>
+                  <option value={45}>45 seconds</option>
+                  <option value={60}>60 seconds</option>
+                  <option value={90}>90 seconds</option>
+                </select>
+              </div>
+
+              <div className="setting-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={getCurrentSettings().imposterKnowsRole}
+                    onChange={(e) => updatePendingSettings({ imposterKnowsRole: e.target.checked })}
+                  />
+                  Imposter knows they're the imposter
+                </label>
+              </div>
+
+              <div className="setting-group">
+                <label>Player Order:</label>
+                <select 
+                  value={getCurrentSettings().playerOrder}
+                  onChange={(e) => updatePendingSettings({ playerOrder: e.target.value })}
+                >
+                  <option value="random">Random</option>
+                  <option value="host-set">Host Sets Order</option>
+                </select>
+              </div>
+
+              {hasUnsavedChanges && (
+                <div className="settings-actions">
+                  <button onClick={discardChanges} className="btn btn-secondary discard-settings-btn">
+                    <span className="btn-icon">↩️</span>
+                    Discard Changes
+                  </button>
+                </div>
+              )}
+
+              <div className="setting-group">
+                <label>Transfer Host:</label>
+                <select onChange={(e) => e.target.value && transferHost(e.target.value)}>
+                  <option value="">Select new host...</option>
+                  {roomData?.players?.filter(p => p.id !== socket.id).map(player => (
+                    <option key={player.id} value={player.id}>{player.name}</option>
+                  )) || []}
+                </select>
+              </div>
+            </div>
+          )}
+
           <div className="host-actions">
-            {roomData.players.length >= 3 ? (
+            {(roomData?.players?.length || 0) >= 3 ? (
               <button onClick={startGame} className="start-game-btn">
                 <span className="btn-icon">🚀</span>
                 Start Game
@@ -332,7 +756,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
                 <div className="player-progress">
                   <div 
                     className="progress-bar" 
-                    style={{ width: `${(roomData.players.length / 3) * 100}%` }}
+                    style={{ width: `${((roomData?.players?.length || 0) / 3) * 100}%` }}
                   ></div>
                 </div>
               </div>
@@ -342,7 +766,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
       )}
 
       {/* Game Controls (for non-hosts) */}
-      {!roomData.isHost && gamePhase === 'waiting' && (
+      {!roomData?.isHost && gamePhase === 'waiting' && (
         <div className="game-controls animate-fade-in-up">
           <div className="waiting-content">
             <div className="waiting-icon">⏳</div>
@@ -352,27 +776,56 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
         </div>
       )}
 
-      {/* Hint Giving Phase */}
-      {gamePhase === 'hint-giving' && (
+      {/* Game Starting - Loading State */}
+      {gamePhase === 'hint-giving' && !playerWord && (
         <div className="game-content animate-fade-in-up">
-          <div className="word-display">
-            <h3>Your word:</h3>
-            <div className="word-container">
-              <span className="word">{playerWord}</span>
-              {isOddOneOut && (
-                <div className="odd-one-out-warning">
-                  <span className="warning-icon">⚠️</span>
-                  <span>You have the different word!</span>
-                </div>
-              )}
+          <div className="loading-game">
+            <div className="loading-icon">🎮</div>
+            <h3>Starting Game...</h3>
+            <p>Please wait while the game is being set up...</p>
+            <div className="loading-spinner"></div>
+          </div>
+
+        </div>
+      )}
+
+      {/* Hint Giving Phase */}
+      {gamePhase === 'hint-giving' && playerWord && turnOrder && Array.isArray(turnOrder) && turnOrder.length > 0 && (
+        <div className="game-content animate-fade-in-up">
+          <div className="game-start-celebration">
+            <h2>🎉 Game Started! 🎉</h2>
+            <p>Let's play OddWord!</p>
+          </div>
+
+          <div className="game-status">
+            <h3>Round {roundNumber}</h3>
+            <div className="turn-order">
+              <h4>Turn Order:</h4>
+              <div className="player-order">
+                {Array.isArray(turnOrder) && turnOrder.map((playerName, index) => (
+                  <span 
+                    key={index} 
+                    className={`order-player ${index === currentTurnIndex ? 'current' : ''} ${index < currentTurnIndex ? 'completed' : ''}`}
+                  >
+                    {playerName}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
 
-          {hints.length > 0 && (
+          <div className="word-display">
+            <h3>🎯 Your word:</h3>
+            <div className="word-container">
+              <span className="word">{playerWord}</span>
+            </div>
+          </div>
+
+          {hints && hints.length > 0 && (
             <div className="hints-list">
               <h4>💡 Hints Given</h4>
               <div className="hints-container">
-                {hints.map((hintData, index) => (
+                {hints && hints.length > 0 ? hints.map((hintData, index) => (
                   <div key={index} className="hint-item" style={{ animationDelay: `${index * 0.1}s` }}>
                     <div className="hint-header">
                       <span className="hint-player">{hintData.playerName}</span>
@@ -380,44 +833,52 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
                     </div>
                     <div className="hint-text">{hintData.hint}</div>
                   </div>
-                ))}
+                )) : (
+                  <div className="no-hints">No hints given yet...</div>
+                )}
               </div>
             </div>
           )}
 
-          {currentTurn < roomData.players.length && (
-            <div className="hint-giving">
-              <div className="turn-indicator-large">
-                <div className="turn-icon">🎯</div>
-                <p>
-                  Current turn: <strong>{roomData.players[currentTurn]?.name}</strong>
-                  {isMyTurn() && <span className="your-turn-highlight"> (Your turn!)</span>}
-                </p>
-              </div>
-              
-              {isMyTurn() && (
-                <form onSubmit={giveHint} className="hint-form">
-                  <div className="hint-input-group">
-                    <input
-                      type="text"
-                      value={hint}
-                      onChange={(e) => setHint(e.target.value)}
-                      placeholder="Give a hint about your word..."
-                      maxLength={50}
-                      autoFocus
-                    />
-                    <div className="hint-char-count">
-                      {hint.length}/50
-                    </div>
-                  </div>
-                  <button type="submit" className="btn btn-primary">
-                    <span className="btn-icon">💭</span>
-                    Submit Hint
-                  </button>
-                </form>
-              )}
+          <div className="hint-giving">
+            <div className="turn-indicator-large">
+              <div className="turn-icon">🎯</div>
+              <p>
+                Current turn: <strong>{getCurrentPlayer()?.name}</strong>
+                {isMyTurn() && <span className="your-turn-highlight"> (Your turn!)</span>}
+              </p>
             </div>
-          )}
+            
+            {isMyTurn() && (
+              <form onSubmit={giveHint} className="hint-form">
+                <div className="hint-input-group">
+                  <input
+                    type="text"
+                    value={hint}
+                    onChange={(e) => setHint(e.target.value)}
+                    placeholder="Give a hint about your word..."
+                    maxLength={50}
+                    autoFocus
+                  />
+                  <div className="hint-char-count">
+                    {hint.length}/50
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-primary" disabled={!hint.trim()}>
+                  <span className="btn-icon">💭</span>
+                  Submit Hint
+                </button>
+              </form>
+            )}
+            
+
+            
+            {!isMyTurn() && (
+              <div className="waiting-turn">
+                <p>Waiting for {getCurrentPlayer()?.name} to give their hint...</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -427,7 +888,12 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
           <div className="results-header">
             <h2>🎉 Game Over!</h2>
             <div className="winner-announcement">
-              {gameResults.winner === 'majority' ? '🏆 Majority Wins!' : '🎭 Odd One Out Wins!'}
+              {gameResults.winner === 'majority' ? '🏆 Majority Wins!' : '🎭 Imposter Wins!'}
+            </div>
+            <div className="win-reason">
+              {gameResults.reason === 'imposter-correct-guess' && '🎯 Imposter guessed correctly!'}
+              {gameResults.reason === 'imposter-wrong-guess' && '❌ Imposter guessed incorrectly!'}
+              {gameResults.reason === 'wrong-person-voted' && '🤷 Wrong person was voted out!'}
             </div>
           </div>
           
@@ -435,29 +901,73 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
             <div className="result-item">
               <span className="result-label">Winner:</span>
               <span className="result-value">
-                {gameResults.winner === 'majority' ? 'Majority' : 'Odd One Out'}
+                {gameResults.winner === 'majority' ? 'Majority Players' : 'Imposter'}
               </span>
             </div>
             
             <div className="result-item">
-              <span className="result-label">Different word:</span>
-              <span className="result-value odd-word">{gameResults.oddWord}</span>
+              <span className="result-label">Imposter:</span>
+              <span className="result-value imposter-name">{gameResults.imposterName}</span>
             </div>
             
             <div className="result-item">
-              <span className="result-label">Common word:</span>
+              <span className="result-label">Majority word:</span>
               <span className="result-value common-word">{gameResults.correctWord}</span>
             </div>
             
             <div className="result-item">
-              <span className="result-label">Odd one out:</span>
-              <span className="result-value">
-                {roomData.players.find(p => p.id === gameResults.oddOneOut)?.name}
-              </span>
+              <span className="result-label">Imposter word:</span>
+              <span className="result-value odd-word">{gameResults.oddWord}</span>
+            </div>
+
+            {gameResults.votedOutPlayer && (
+              <div className="result-item">
+                <span className="result-label">Voted out:</span>
+                <span className="result-value">{gameResults.votedOutPlayer}</span>
+              </div>
+            )}
+
+            {gameResults.imposterGuess && (
+              <div className="result-item">
+                <span className="result-label">Imposter's guess:</span>
+                <span className="result-value">{gameResults.imposterGuess}</span>
+              </div>
+            )}
+
+            {gameResults.voteCounts && (
+              <div className="vote-results">
+                <h4>Vote Results:</h4>
+                {Object.entries(gameResults.voteCounts || {}).map(([playerId, votes]) => {
+                  const player = roomData?.players?.find(p => p.id === playerId);
+                  return (
+                    <div key={playerId} className="vote-result">
+                      <span>{player?.name || 'Unknown'}: {votes} vote{votes !== 1 ? 's' : ''}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="hints-recap">
+            <h4>All Hints:</h4>
+            <div className="hints-container">
+              {gameResults.allHints?.map((hint, index) => (
+                <div key={index} className="hint-item small">
+                  <strong>{hint.playerName}:</strong> "{hint.hint}"
+                </div>
+              ))}
             </div>
           </div>
           
-          <button onClick={() => setGamePhase('waiting')} className="btn btn-primary play-again-btn">
+          <button onClick={() => {
+            setGamePhase('waiting');
+            setHints([]);
+            setGameResults(null);
+            setCurrentTurnIndex(0);
+            setTurnOrder([]);
+            setRoundNumber(1);
+          }} className="btn btn-primary play-again-btn">
             <span className="btn-icon">🔄</span>
             Play Again
           </button>

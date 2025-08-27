@@ -32,7 +32,7 @@ function VotingPhase({ socket, roomData, timer, formatTime }) {
     setShowVoteConfirmation(false);
   };
 
-  const otherPlayers = roomData.players.filter(p => p.id !== socket.id);
+  const otherPlayers = roomData?.players?.filter(p => p.id !== socket.id) || [];
 
   return (
     <div className="voting-phase">
