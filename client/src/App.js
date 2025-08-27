@@ -288,7 +288,7 @@ function App() {
         </>
       )}
 
-      {gameState === 'room' || gameState === 'playing' && (
+      {(gameState === 'room' || gameState === 'playing') && (
         <>
           <GameRoom
             socket={socket}
