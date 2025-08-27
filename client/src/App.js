@@ -22,6 +22,7 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [playerId, setPlayerId] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
+  const [hasJoinedRoom, setHasJoinedRoom] = useState(false);
 
   const addNotification = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now();
@@ -61,8 +62,14 @@ function App() {
   }, [pollingInterval]);
 
   // Direct room joining function wrapped in useCallback
-  const joinRoomDirectly = useCallback(async (roomCode, playerNameToUse) => {
-    console.log('🎯 joinRoomDirectly called with code:', roomCode);
+  const joinRoomDirectly = useCallback(async (roomCode, playerNameToUse, updateURL = true) => {
+    console.log('🎯 joinRoomDirectly called with code:', roomCode, 'updateURL:', updateURL);
+    
+    // Prevent duplicate joins if already in a room
+    if (gameState === 'room' || gameState === 'playing') {
+      console.log('⚠️ Already in a room, skipping join');
+      return;
+    }
     
     try {
       const response = await fetch(`${API_URL}/api/join-room`, {
@@ -86,13 +93,20 @@ function App() {
       setRoomData(data.room);
       setGameState('room');
       setError('');
-      addNotification(`Joined room ${roomCode}!`, 'success', 3000);
+      
+      // Only show notification if we haven't already joined this room
+      if (!hasJoinedRoom) {
+        addNotification(`Joined room ${roomCode}!`, 'success', 3000);
+        setHasJoinedRoom(true);
+      }
       
       // Store player name for future use
       localStorage.setItem('playerName', playerNameToUse);
       
-      // Update URL to show room code
-      window.history.pushState({}, '', `/${roomCode}`);
+      // Only update URL if explicitly requested (for direct joins, not URL-based joins)
+      if (updateURL) {
+        window.history.pushState({}, '', `/${roomCode}`);
+      }
       
       // Start polling for room updates
       startRoomPolling(roomCode);
@@ -102,7 +116,7 @@ function App() {
       setError(`Failed to join room: ${error.message}`);
       addNotification(`Failed to join room: ${error.message}`, 'error');
     }
-  }, [addNotification, startRoomPolling]);
+  }, [addNotification, startRoomPolling, gameState, hasJoinedRoom]);
 
   const createRoom = async () => {
     console.log('🚀 createRoom called');
@@ -153,6 +167,12 @@ function App() {
 
   // Check if we're already in a room from URL
   const checkRoomAndJoin = useCallback(async (roomCode) => {
+    // Don't check if we're already in a room
+    if (gameState === 'room' || gameState === 'playing') {
+      console.log('⚠️ Already in a room, skipping room check');
+      return;
+    }
+    
     try {
       const response = await fetch(`${API_URL}/api/room/${roomCode}/status`);
       if (response.ok) {
@@ -164,7 +184,8 @@ function App() {
         if (storedPlayerName) {
           setPlayerName(storedPlayerName);
           // Join the room directly here instead of using useEffect
-          await joinRoomDirectly(roomCode, storedPlayerName);
+          // Don't update URL since we're already on this URL
+          await joinRoomDirectly(roomCode, storedPlayerName, false);
         } else {
           // Room exists but no player name, stay in lobby
           setError(`Room ${roomCode} exists. Please enter your name to join.`);
@@ -177,7 +198,7 @@ function App() {
       console.error('❌ Error checking room:', error);
       setError(`Error checking room: ${error.message}`);
     }
-  }, [joinRoomDirectly]); // Include joinRoomDirectly as dependency
+  }, [gameState, joinRoomDirectly]); // Add joinRoomDirectly dependency
 
   const stopRoomPolling = useCallback(() => {
     if (pollingInterval) {
@@ -194,6 +215,7 @@ function App() {
     setRoomData(null);
     setPlayerId(null);
     setGameState('lobby');
+    setHasJoinedRoom(false); // Reset the joined room flag
     
     // Update URL back to root
     window.history.pushState({}, '', '/');
@@ -205,6 +227,11 @@ function App() {
   };
 
   useEffect(() => {
+    // Don't check room if we're already in one
+    if (gameState === 'room' || gameState === 'playing') {
+      return;
+    }
+    
     const pathParts = window.location.pathname.split('/');
     if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '') {
       const roomCode = pathParts[1];
@@ -213,7 +240,7 @@ function App() {
       // Check if room exists
       checkRoomAndJoin(roomCode);
     }
-  }, [checkRoomAndJoin]);
+  }, [checkRoomAndJoin, gameState]);
 
   useEffect(() => {
     console.log('🔗 Checking API connectivity at:', API_URL);
