@@ -11,7 +11,15 @@ const server = http.createServer(app);
 
 // CORS configuration
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'],
+  origin: [
+    'http://localhost:3000', 
+    'http://localhost:3001', 
+    'http://127.0.0.1:3000',
+    'https://vv-games.vercel.app',
+    'https://vv-games-vishalt25.vercel.app',
+    /^https:\/\/.*\.vercel\.app$/,
+    /^https:\/\/.*\.vercel\.app$/
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -74,7 +82,15 @@ app.get('/api/room/:code', (req, res) => {
 // Socket.io setup
 const io = socketIo(server, {
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'],
+    origin: [
+      'http://localhost:3000', 
+      'http://localhost:3001', 
+      'http://127.0.0.1:3000',
+      'https://vv-games.vercel.app',
+      'https://vv-games-vishalt25.vercel.app',
+      /^https:\/\/.*\.vercel\.app$/,
+      /^https:\/\/.*\.vercel\.app$/
+    ],
     methods: ["GET", "POST"],
     credentials: true
   }
