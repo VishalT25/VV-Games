@@ -38,6 +38,72 @@ function App() {
     setNotifications(prev => prev.filter(n => n !== id));
   };
 
+  const startRoomPolling = useCallback((roomCode) => {
+    // Clear any existing polling
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+    }
+    
+    // Start new polling
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/room/${roomCode}/poll`);
+        if (response.ok) {
+          const roomStatus = await response.json();
+          setRoomData(roomStatus);
+        }
+      } catch (error) {
+        console.error('❌ Polling error:', error);
+      }
+    }, 2000); // Poll every 2 seconds
+    
+    setPollingInterval(interval);
+  }, [pollingInterval]);
+
+  // Direct room joining function wrapped in useCallback
+  const joinRoomDirectly = useCallback(async (roomCode, playerNameToUse) => {
+    console.log('🎯 joinRoomDirectly called with code:', roomCode);
+    
+    try {
+      const response = await fetch(`${API_URL}/api/join-room`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomCode: roomCode,
+          playerName: playerNameToUse
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('✅ Joined room successfully:', data);
+      
+      setPlayerId(data.playerId);
+      setRoomData(data.room);
+      setGameState('room');
+      setError('');
+      addNotification(`Joined room ${roomCode}!`, 'success', 3000);
+      
+      // Store player name for future use
+      localStorage.setItem('playerName', playerNameToUse);
+      
+      // Update URL to show room code
+      window.history.pushState({}, '', `/${roomCode}`);
+      
+      // Start polling for room updates
+      startRoomPolling(roomCode);
+      
+    } catch (error) {
+      console.error('❌ Error joining room:', error);
+      setError(`Failed to join room: ${error.message}`);
+      addNotification(`Failed to join room: ${error.message}`, 'error');
+    }
+  }, [addNotification, startRoomPolling]);
+
   const createRoom = async () => {
     console.log('🚀 createRoom called');
     console.log('Player name:', playerName);
@@ -111,73 +177,7 @@ function App() {
       console.error('❌ Error checking room:', error);
       setError(`Error checking room: ${error.message}`);
     }
-  }, []); // No dependencies needed
-
-  // Direct room joining function to avoid useEffect dependencies
-  const joinRoomDirectly = async (roomCode, playerNameToUse) => {
-    console.log('🎯 joinRoomDirectly called with code:', roomCode);
-    
-    try {
-      const response = await fetch(`${API_URL}/api/join-room`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomCode: roomCode,
-          playerName: playerNameToUse
-        })
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('✅ Joined room successfully:', data);
-      
-      setPlayerId(data.playerId);
-      setRoomData(data.room);
-      setGameState('room');
-      setError('');
-      addNotification(`Joined room ${roomCode}!`, 'success', 3000);
-      
-      // Store player name for future use
-      localStorage.setItem('playerName', playerNameToUse);
-      
-      // Update URL to show room code
-      window.history.pushState({}, '', `/${roomCode}`);
-      
-      // Start polling for room updates
-      startRoomPolling(roomCode);
-      
-    } catch (error) {
-      console.error('❌ Error joining room:', error);
-      setError(`Failed to join room: ${error.message}`);
-      addNotification(`Failed to join room: ${error.message}`, 'error');
-    }
-  };
-
-  const startRoomPolling = (roomCode) => {
-    // Clear any existing polling
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-    }
-    
-    // Start new polling
-    const interval = setInterval(async () => {
-      try {
-        const response = await fetch(`${API_URL}/api/room/${roomCode}/poll`);
-        if (response.ok) {
-          const roomStatus = await response.json();
-          setRoomData(roomStatus);
-        }
-      } catch (error) {
-        console.error('❌ Polling error:', error);
-      }
-    }, 2000); // Poll every 2 seconds
-    
-    setPollingInterval(interval);
-  };
+  }, [joinRoomDirectly]); // Include joinRoomDirectly as dependency
 
   const stopRoomPolling = useCallback(() => {
     if (pollingInterval) {
