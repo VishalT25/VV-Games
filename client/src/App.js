@@ -139,7 +139,7 @@ function App() {
   // Store joinRoom function in ref
   useEffect(() => {
     joinRoomRef.current = joinRoom;
-  }, [playerName]); // Only update when playerName changes
+  }, []); // No dependencies needed since we're using ref to avoid circular dependencies
 
   // Check if we're already in a room from URL
   const checkRoomAndJoin = useCallback(async (roomCode) => {
