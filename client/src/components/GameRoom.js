@@ -12,7 +12,6 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   const [gamePhase, setGamePhase] = useState('waiting'); // waiting, hint-giving, decision, voting, imposter-guess, finished
   const [playerWord, setPlayerWord] = useState('');
   const [isOddOneOut, setIsOddOneOut] = useState(false);
-  const [knowsRole, setKnowsRole] = useState(true);
   const [hints, setHints] = useState([]);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [turnOrder, setTurnOrder] = useState([]);
@@ -121,7 +120,6 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
       
       setPlayerWord(data.word);
       setIsOddOneOut(data.isOddOneOut);
-      setKnowsRole(data.knowsRole);
       setTimer(data.timer);
       setCurrentTurnIndex(data.currentTurnIndex);
       setTurnOrder(data.turnOrder);

@@ -24,18 +24,7 @@ function App() {
   const [pollingInterval, setPollingInterval] = useState(null);
 
   // Check if we're already in a room from URL
-  useEffect(() => {
-    const pathParts = window.location.pathname.split('/');
-    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '') {
-      const roomCode = pathParts[1];
-      console.log('🔍 Found room code in URL:', roomCode);
-      
-      // Check if room exists and try to join
-      checkRoomAndJoin(roomCode);
-    }
-  }, []);
-
-  const checkRoomAndJoin = async (roomCode) => {
+  const checkRoomAndJoin = useCallback(async (roomCode) => {
     try {
       const response = await fetch(`${API_URL}/api/room/${roomCode}/status`);
       if (response.ok) {
@@ -59,7 +48,18 @@ function App() {
       console.error('❌ Error checking room:', error);
       setError(`Error checking room: ${error.message}`);
     }
-  };
+  }, [API_URL, joinRoom]);
+
+  useEffect(() => {
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '') {
+      const roomCode = pathParts[1];
+      console.log('🔍 Found room code in URL:', roomCode);
+      
+      // Check if room exists and try to join
+      checkRoomAndJoin(roomCode);
+    }
+  }, [checkRoomAndJoin]);
 
   const addNotification = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now();
