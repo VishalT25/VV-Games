@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import VotingPhase from './VotingPhase';
 
-function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
+function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, apiUrl }) {
   console.log('🎮 GameRoom rendered with:', { 
-    socket: socket?.connected, 
-    roomData: roomData?.roomCode, 
+    roomData: roomData?.code, 
     playerName,
+    playerId,
     gamePhase: 'waiting'
   });
   
   const [gamePhase, setGamePhase] = useState('waiting'); // waiting, hint-giving, decision, voting, imposter-guess, finished
   const [playerWord, setPlayerWord] = useState('');
   const [isOddOneOut, setIsOddOneOut] = useState(false);
-  const [knowsRole, setKnowsRole] = useState(true); // eslint-disable-line no-unused-vars
+  const [knowsRole, setKnowsRole] = useState(true);
   const [hints, setHints] = useState([]);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [turnOrder, setTurnOrder] = useState([]);
@@ -67,29 +67,51 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showGameDropdown]);
 
+  // Update game phase when room data changes
   useEffect(() => {
-    socket.on('player-joined', (data) => {
-      setRoomData(prev => ({ ...prev, players: data.players }));
-    });
+    if (roomData?.gameData) {
+      setGamePhase(roomData.gameData.phase || 'waiting');
+      setHints(roomData.gameData.hints || []);
+    }
+  }, [roomData]);
 
-    socket.on('player-left', (data) => {
-      setRoomData(prev => ({ ...prev, players: data.players }));
-      
-      // Show notification for kicked players
-      if (data.kicked && data.kickedPlayerName) {
-        // You can add a notification here if you want to show who was kicked
-        console.log(`${data.kickedPlayerName} was kicked from the room`);
-      }
-    });
+  // Check if current player is host
+  const isHost = roomData?.players?.find(p => p.id === playerId)?.isHost || false;
 
-    socket.on('kicked', (data) => {
-      // Handle being kicked
-      setGameState('lobby');
-      // You can show a notification here
-      console.log('You have been kicked from the room');
-    });
-
-    socket.on('game-started', (data) => {
+  const startGame = () => {
+    console.log('🎮 Start game button clicked');
+    console.log('Room data:', roomData);
+    console.log('Player count:', roomData?.players?.length);
+    
+    if (!roomData?.players?.length || roomData?.players?.length < 3) {
+      console.error('❌ Not enough players:', roomData?.players?.length || 0);
+      return;
+    }
+    
+    const currentSettings = getCurrentSettings();
+    let finalSettings = { ...currentSettings };
+    
+    if (currentSettings.playerOrder === 'host-set' && customPlayerOrder.length > 0 && roomData?.players && Array.isArray(roomData.players)) {
+      // Convert player IDs to player indices for the backend
+      const playerIndices = customPlayerOrder.map(playerId => {
+        const playerIndex = roomData.players.findIndex(p => p.id === playerId);
+        return playerIndex;
+      });
+      finalSettings.customOrder = playerIndices;
+    } else {
+      finalSettings.customOrder = null;
+    }
+    
+    console.log('📡 Emitting start-game event with settings:', finalSettings);
+    fetch(`${apiUrl}/start-game`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(finalSettings),
+    })
+    .then(response => response.json())
+    .then(data => {
       console.log('🎉 Game started event received:', data);
       console.log('📝 Word data:', data.word);
       console.log('🎭 Is odd one out:', data.isOddOneOut);
@@ -115,9 +137,25 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
       console.log('✅ Game phase set to hint-giving');
       console.log('✅ Player word set to:', data.word);
       console.log('✅ Turn order set to:', data.turnOrder);
+    })
+    .catch(error => {
+      console.error('❌ Error starting game:', error);
     });
+  };
 
-    socket.on('hint-given', (data) => {
+  const giveHint = (e) => {
+    e.preventDefault();
+    if (!hint.trim()) return;
+    
+    fetch(`${apiUrl}/give-hint`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ hint: hint.trim() }),
+    })
+    .then(response => response.json())
+    .then(data => {
       setHints(prev => [...prev, {
         playerName: data.playerName,
         hint: data.hint,
@@ -125,120 +163,11 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
         playerIndex: data.playerIndex,
         timestamp: data.timestamp
       }]);
+      setHint('');
+    })
+    .catch(error => {
+      console.error('❌ Error giving hint:', error);
     });
-
-    socket.on('next-turn', (data) => {
-      setCurrentTurnIndex(data.currentTurnIndex);
-      setTimer(data.timer);
-    });
-
-    socket.on('all-hints-given', (data) => {
-      setGamePhase('decision');
-      setRoundNumber(data.roundNumber);
-    });
-
-    socket.on('continue-hints', (data) => {
-      setGamePhase('hint-giving');
-      setCurrentTurnIndex(data.currentTurnIndex);
-      setTimer(data.timer);
-      setRoundNumber(data.roundNumber);
-    });
-
-    socket.on('voting-phase-start', (data) => {
-      setGamePhase('voting');
-      setTimer(data.timer);
-    });
-
-    socket.on('imposter-voted-out', (data) => {
-      setGameResults(data);
-      setGamePhase('imposter-guess');
-    });
-
-    socket.on('imposter-guess-prompt', (data) => {
-      setTimer(data.timeLimit);
-    });
-
-    socket.on('game-ended', (data) => {
-      setGameResults(data);
-      setGamePhase('finished');
-    });
-
-    socket.on('host-transferred', (data) => {
-      setRoomData(prev => ({ ...prev, players: data.players }));
-    });
-
-    socket.on('settings-updated', (data) => {
-      setGameSettings(data.settings);
-    });
-
-    return () => {
-      socket.off('player-joined');
-      socket.off('player-left');
-      socket.off('kicked');
-      socket.off('game-started');
-      socket.off('hint-given');
-      socket.off('next-turn');
-      socket.off('all-hints-given');
-      socket.off('continue-hints');
-      socket.off('voting-phase-start');
-      socket.off('imposter-voted-out');
-      socket.off('imposter-guess-prompt');
-      socket.off('game-ended');
-      socket.off('host-transferred');
-      socket.off('settings-updated');
-    };
-  }, [socket, setRoomData, setGameState]);
-
-  // Timer countdown
-  useEffect(() => {
-    if (timer > 0) {
-      const interval = setInterval(() => {
-        setTimer(prev => prev - 1000);
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, [timer]);
-
-  const startGame = () => {
-    console.log('🎮 Start game button clicked');
-    console.log('Socket connected:', socket?.connected);
-    console.log('Room data:', roomData);
-    console.log('Player count:', roomData?.players?.length);
-    
-    if (!socket || !socket.connected) {
-      console.error('❌ Socket not connected');
-      return;
-    }
-    
-    if (roomData?.players?.length < 3) {
-      console.error('❌ Not enough players:', roomData?.players?.length || 0);
-      return;
-    }
-    
-    const currentSettings = getCurrentSettings();
-    let finalSettings = { ...currentSettings };
-    
-    if (currentSettings.playerOrder === 'host-set' && customPlayerOrder.length > 0 && roomData?.players && Array.isArray(roomData.players)) {
-      // Convert player IDs to player indices for the backend
-      const playerIndices = customPlayerOrder.map(playerId => {
-        const playerIndex = roomData.players.findIndex(p => p.id === playerId);
-        return playerIndex;
-      });
-      finalSettings.customOrder = playerIndices;
-    } else {
-      finalSettings.customOrder = null;
-    }
-    
-    console.log('📡 Emitting start-game event with settings:', finalSettings);
-    socket.emit('start-game', finalSettings);
-  };
-
-  const giveHint = (e) => {
-    e.preventDefault();
-    if (!hint.trim()) return;
-    
-    socket.emit('give-hint', { hint: hint.trim() });
-    setHint('');
   };
 
   const formatTime = (ms) => {
@@ -259,11 +188,11 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
     }
     const currentPlayerName = turnOrder[currentTurnIndex];
     const currentPlayer = roomData.players.find(p => p.name === currentPlayerName);
-    const isMyTurn = currentPlayer?.id === socket.id;
+    const isMyTurn = currentPlayer?.id === playerId;
     console.log('🎯 Turn check:', { 
       currentPlayerName, 
       currentPlayerId: currentPlayer?.id, 
-      myId: socket.id, 
+      myId: playerId, 
       isMyTurn 
     });
     return isMyTurn;
@@ -276,22 +205,66 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
   };
 
   const continueHints = () => {
-    socket.emit('decision-continue-hints');
+    fetch(`${apiUrl}/decision-continue-hints`)
+    .then(response => response.json())
+    .then(data => {
+      setGamePhase(data.phase);
+      setCurrentTurnIndex(data.currentTurnIndex);
+      setTimer(data.timer);
+      setRoundNumber(data.roundNumber);
+    })
+    .catch(error => {
+      console.error('❌ Error continuing hints:', error);
+    });
   };
 
   const startVoting = () => {
-    socket.emit('decision-start-voting');
+    fetch(`${apiUrl}/decision-start-voting`)
+    .then(response => response.json())
+    .then(data => {
+      setGamePhase(data.phase);
+      setTimer(data.timer);
+    })
+    .catch(error => {
+      console.error('❌ Error starting voting:', error);
+    });
   };
 
   const submitImposterGuess = (e) => {
     e.preventDefault();
     if (!imposterGuess.trim()) return;
-    socket.emit('imposter-guess', { guess: imposterGuess.trim() });
-    setImposterGuess('');
+    fetch(`${apiUrl}/imposter-guess`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ guess: imposterGuess.trim() }),
+    })
+    .then(response => response.json())
+    .then(data => {
+      setGameResults(data);
+      setGamePhase('imposter-guess');
+    })
+    .catch(error => {
+      console.error('❌ Error submitting imposter guess:', error);
+    });
   };
 
   const transferHost = (newHostId) => {
-    socket.emit('transfer-host', { newHostId });
+    fetch(`${apiUrl}/transfer-host`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ newHostId }),
+    })
+    .then(response => response.json())
+    .then(data => {
+      setRoomData(prev => ({ ...prev, players: data.players }));
+    })
+    .catch(error => {
+      console.error('❌ Error transferring host:', error);
+    });
   };
 
   const updatePendingSettings = (newSettings) => {
@@ -303,9 +276,22 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
   const saveSettings = () => {
     if (pendingSettings) {
       setGameSettings(pendingSettings);
-      socket.emit('update-game-settings', { settings: pendingSettings });
-      setPendingSettings(null);
-      setHasUnsavedChanges(false);
+      fetch(`${apiUrl}/update-game-settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ settings: pendingSettings }),
+      })
+      .then(response => response.json())
+      .then(data => {
+        setGameSettings(data.settings);
+        setPendingSettings(null);
+        setHasUnsavedChanges(false);
+      })
+      .catch(error => {
+        console.error('❌ Error saving settings:', error);
+      });
     }
   };
 
@@ -354,7 +340,20 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
         const playerIndex = roomData.players.findIndex(p => p.id === playerId);
         return playerIndex;
       });
-      socket.emit('set-player-order', { customOrder: playerIndices });
+      fetch(`${apiUrl}/set-player-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ customOrder: playerIndices }),
+      })
+      .then(response => response.json())
+      .then(data => {
+        setRoomData(prev => ({ ...prev, players: data.players }));
+      })
+      .catch(error => {
+        console.error('❌ Error setting player order:', error);
+      });
     }
     setDraggedPlayer(null);
   };
@@ -365,7 +364,6 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
 
   const leaveRoom = () => {
     setGameState('lobby');
-    socket.disconnect();
     window.location.reload();
   };
 
@@ -378,8 +376,21 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
   };
 
   const kickPlayer = (playerId) => {
-    socket.emit('kick-player', { playerId });
-    setShowKickConfirm(null);
+    fetch(`${apiUrl}/kick-player`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ playerId }),
+    })
+    .then(response => response.json())
+    .then(data => {
+      setRoomData(prev => ({ ...prev, players: data.players }));
+      setShowKickConfirm(null);
+    })
+    .catch(error => {
+      console.error('❌ Error kicking player:', error);
+    });
   };
 
   const confirmKick = (player) => {
@@ -393,7 +404,6 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
   if (gamePhase === 'voting') {
     return (
       <VotingPhase
-        socket={socket}
         roomData={roomData}
         timer={timer}
         formatTime={formatTime}
@@ -422,7 +432,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
             </div>
           </div>
 
-          {roomData?.isHost ? (
+          {isHost ? (
             <div className="decision-actions animate-fade-in-up">
               <button onClick={continueHints} className="btn btn-secondary">
                 <span className="btn-icon">🔄</span>
@@ -511,7 +521,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
       {/* Room Header */}
       <div className="room-header animate-fade-in-down">
         <div className="room-info">
-          <h2>🎮 Room: {roomData.roomCode}</h2>
+          <h2>🎮 Room: {roomData.code}</h2>
           <p className="room-subtitle">OddWord</p>
         </div>
         <div className="room-actions">
@@ -570,12 +580,12 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
                 {roomData?.players?.map((player, index) => (
                   <div
                     key={player.id}
-                    className={`player-card ${player.id === socket.id ? 'you' : ''} ${
-                      gamePhase === 'hint-giving' && isMyTurn() && player.id === socket.id ? 'current-turn' : ''
+                    className={`player-card ${player.id === playerId ? 'you' : ''} ${
+                      gamePhase === 'hint-giving' && isMyTurn() && player.id === playerId ? 'current-turn' : ''
                     }`}
                   >
                     {/* Player Controls (only visible to host) */}
-                    {roomData?.isHost && player.id !== socket.id && (
+                    {isHost && player.id !== playerId && (
                       <div className="player-controls">
                         <button
                           className="player-control-btn kick-btn"
@@ -594,9 +604,9 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
                     <div className="player-info">
                       <div className="player-name">
                         {player.name}
-                        {player.id === socket.id && <span className="you-badge">(You)</span>}
+                        {player.id === playerId && <span className="you-badge">(You)</span>}
                         {player.isHost && <span className="host-badge">Host</span>}
-                        {gamePhase === 'hint-giving' && isMyTurn() && player.id === socket.id && (
+                        {gamePhase === 'hint-giving' && isMyTurn() && player.id === playerId && (
                           <span className="turn-indicator">Your Turn!</span>
                         )}
                       </div>
@@ -606,7 +616,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
               </div>
 
               {/* Player Order Configuration */}
-              {roomData?.isHost && getCurrentSettings().playerOrder === 'host-set' && roomData?.players && Array.isArray(roomData.players) && (
+              {isHost && getCurrentSettings().playerOrder === 'host-set' && roomData?.players && Array.isArray(roomData.players) && (
                 <div className="player-order-config">
                   <h4>🎯 Set Turn Order</h4>
                   <p className="order-instruction">Drag players to reorder the turn sequence:</p>
@@ -654,7 +664,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
       )}
 
       {/* Host Controls */}
-      {roomData?.isHost && gamePhase === 'waiting' && (
+      {isHost && gamePhase === 'waiting' && (
         <div className="host-controls animate-fade-in-up">
           <div className="host-header">
             <h4>👑 Host Controls</h4>
@@ -735,7 +745,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
                 <label>Transfer Host:</label>
                 <select onChange={(e) => e.target.value && transferHost(e.target.value)}>
                   <option value="">Select new host...</option>
-                  {roomData?.players?.filter(p => p.id !== socket.id).map(player => (
+                  {roomData?.players?.filter(p => p.id !== playerId).map(player => (
                     <option key={player.id} value={player.id}>{player.name}</option>
                   )) || []}
                 </select>
@@ -766,7 +776,7 @@ function GameRoom({ socket, roomData, setRoomData, playerName, setGameState }) {
       )}
 
       {/* Game Controls (for non-hosts) */}
-      {!roomData?.isHost && gamePhase === 'waiting' && (
+      {!isHost && gamePhase === 'waiting' && (
         <div className="game-controls animate-fade-in-up">
           <div className="waiting-content">
             <div className="waiting-icon">⏳</div>

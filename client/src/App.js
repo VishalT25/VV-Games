@@ -23,6 +23,44 @@ function App() {
   const [playerId, setPlayerId] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
 
+  // Check if we're already in a room from URL
+  useEffect(() => {
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '') {
+      const roomCode = pathParts[1];
+      console.log('🔍 Found room code in URL:', roomCode);
+      
+      // Check if room exists and try to join
+      checkRoomAndJoin(roomCode);
+    }
+  }, []);
+
+  const checkRoomAndJoin = async (roomCode) => {
+    try {
+      const response = await fetch(`${API_URL}/api/room/${roomCode}/status`);
+      if (response.ok) {
+        const roomStatus = await response.json();
+        console.log('✅ Room found:', roomStatus);
+        
+        // If we have a player name stored, try to join
+        const storedPlayerName = localStorage.getItem('playerName');
+        if (storedPlayerName) {
+          setPlayerName(storedPlayerName);
+          await joinRoom(roomCode);
+        } else {
+          // Room exists but no player name, stay in lobby
+          setError(`Room ${roomCode} exists. Please enter your name to join.`);
+        }
+      } else {
+        console.log('❌ Room not found:', roomCode);
+        setError(`Room ${roomCode} not found.`);
+      }
+    } catch (error) {
+      console.error('❌ Error checking room:', error);
+      setError(`Error checking room: ${error.message}`);
+    }
+  };
+
   const addNotification = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now();
     const notification = { id, message, type, duration };
@@ -127,6 +165,9 @@ function App() {
         throw new Error('Invalid room data received');
       }
       
+      // Store player name for future use
+      localStorage.setItem('playerName', playerName.trim());
+      
       // Now join the room
       await joinRoom(data.roomCode);
       
@@ -168,6 +209,12 @@ function App() {
       setGameState('room');
       setError('');
       addNotification(`Joined room ${roomCode}!`, 'success', 3000);
+      
+      // Store player name for future use
+      localStorage.setItem('playerName', playerName.trim());
+      
+      // Update URL to show room code
+      window.history.pushState({}, '', `/${roomCode}`);
       
       // Start polling for room updates
       startRoomPolling(roomCode);
@@ -214,6 +261,24 @@ function App() {
       stopRoomPolling();
     };
   }, [stopRoomPolling]);
+
+  const leaveRoom = () => {
+    // Stop polling
+    stopRoomPolling();
+    
+    // Clear room data
+    setRoomData(null);
+    setPlayerId(null);
+    setGameState('lobby');
+    
+    // Update URL back to root
+    window.history.pushState({}, '', '/');
+    
+    // Clear error
+    setError('');
+    
+    addNotification('Left the room', 'info');
+  };
 
   return (
     <div className="App">
@@ -293,6 +358,7 @@ function App() {
             setGameState={setGameState}
             playerId={playerId}
             apiUrl={API_URL}
+            leaveRoom={leaveRoom}
           />
           
           {/* Notification Container */}
