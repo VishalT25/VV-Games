@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Lobby from './components/Lobby';
 import GameRoom from './components/GameRoom';
 import Notification from './components/Notification';
@@ -22,6 +22,9 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [playerId, setPlayerId] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
+  
+  // Use ref to store joinRoom function to avoid dependency issues
+  const joinRoomRef = useRef();
 
   const addNotification = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now();
@@ -76,7 +79,7 @@ function App() {
       localStorage.setItem('playerName', playerName.trim());
       
       // Now join the room
-      await joinRoom(data.roomCode);
+      await joinRoomRef.current(data.roomCode);
       
     } catch (error) {
       console.error('❌ Error creating room:', error);
@@ -133,6 +136,11 @@ function App() {
     }
   };
 
+  // Store joinRoom function in ref
+  useEffect(() => {
+    joinRoomRef.current = joinRoom;
+  }, [playerName]); // Only update when playerName changes
+
   // Check if we're already in a room from URL
   const checkRoomAndJoin = useCallback(async (roomCode) => {
     try {
@@ -165,12 +173,12 @@ function App() {
   // Handle room joining when player name is available
   useEffect(() => {
     const pathParts = window.location.pathname.split('/');
-    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '' && playerName) {
+    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '' && playerName && joinRoomRef.current) {
       const roomCode = pathParts[1];
       console.log('🔍 Player name available, joining room:', roomCode);
-      joinRoom(roomCode);
+      joinRoomRef.current(roomCode);
     }
-  }, [playerName]);
+  }, [playerName]); // Only depends on playerName, not joinRoom
 
   useEffect(() => {
     const pathParts = window.location.pathname.split('/');
