@@ -23,44 +23,6 @@ function App() {
   const [playerId, setPlayerId] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
 
-  // Check if we're already in a room from URL
-  const checkRoomAndJoin = useCallback(async (roomCode) => {
-    try {
-      const response = await fetch(`${API_URL}/api/room/${roomCode}/status`);
-      if (response.ok) {
-        const roomStatus = await response.json();
-        console.log('✅ Room found:', roomStatus);
-        
-        // If we have a player name stored, try to join
-        const storedPlayerName = localStorage.getItem('playerName');
-        if (storedPlayerName) {
-          setPlayerName(storedPlayerName);
-          await joinRoom(roomCode);
-        } else {
-          // Room exists but no player name, stay in lobby
-          setError(`Room ${roomCode} exists. Please enter your name to join.`);
-        }
-      } else {
-        console.log('❌ Room not found:', roomCode);
-        setError(`Room ${roomCode} not found.`);
-      }
-    } catch (error) {
-      console.error('❌ Error checking room:', error);
-      setError(`Error checking room: ${error.message}`);
-    }
-  }, [API_URL, joinRoom]);
-
-  useEffect(() => {
-    const pathParts = window.location.pathname.split('/');
-    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '') {
-      const roomCode = pathParts[1];
-      console.log('🔍 Found room code in URL:', roomCode);
-      
-      // Check if room exists and try to join
-      checkRoomAndJoin(roomCode);
-    }
-  }, [checkRoomAndJoin]);
-
   const addNotification = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now();
     const notification = { id, message, type, duration };
@@ -75,61 +37,6 @@ function App() {
   const removeNotification = (id) => {
     setNotifications(prev => prev.filter(n => n !== id));
   };
-
-  useEffect(() => {
-    console.log('🔗 Checking API connectivity at:', API_URL);
-    console.log('🌍 Environment:', process.env.NODE_ENV);
-    
-    // Check if the backend is accessible
-    const checkBackendHealth = async () => {
-      try {
-        console.log('🏥 Checking backend health at:', `${API_URL}/api/health`);
-        const response = await fetch(`${API_URL}/api/health`, {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (response.ok) {
-          const healthData = await response.json();
-          console.log('✅ Backend health check passed:', healthData);
-          setIsConnected(true);
-          setIsConnecting(false);
-          setError('');
-          addNotification('Connected to server successfully!', 'success', 3000);
-        } else {
-          console.error('❌ Backend health check failed:', response.status, response.statusText);
-          setIsConnected(false);
-          setIsConnecting(false);
-          setError(`Backend health check failed: ${response.status} ${response.statusText}`);
-        }
-      } catch (healthError) {
-        console.error('❌ Backend health check error:', healthError);
-        setIsConnected(false);
-        setIsConnecting(false);
-        
-        let errorMessage = 'Failed to connect to server. ';
-        if (healthError.message) {
-          errorMessage += `Error: ${healthError.message}. `;
-        }
-        if (healthError.code === 'ECONNREFUSED') {
-          errorMessage += 'Server is not running or not accessible.';
-        } else if (healthError.code === 'ENOTFOUND') {
-          errorMessage += 'Server domain not found. Check if backend is deployed.';
-        } else if (healthError.code === 'ETIMEDOUT') {
-          errorMessage += 'Connection timed out. Server might be overloaded.';
-        } else if (healthError.code === 'ERR_NETWORK') {
-          errorMessage += 'Network error. Check your internet connection.';
-        } else {
-          errorMessage += `Connection failed (Code: ${healthError.code || 'Unknown'}).`;
-        }
-        
-        setError(errorMessage);
-        addNotification(errorMessage, 'error');
-      }
-    };
-    
-    checkBackendHealth();
-  }, [addNotification]);
 
   const createRoom = async () => {
     console.log('🚀 createRoom called');
@@ -225,6 +132,99 @@ function App() {
       addNotification(`Failed to join room: ${error.message}`, 'error');
     }
   };
+
+  // Check if we're already in a room from URL
+  const checkRoomAndJoin = useCallback(async (roomCode) => {
+    try {
+      const response = await fetch(`${API_URL}/api/room/${roomCode}/status`);
+      if (response.ok) {
+        const roomStatus = await response.json();
+        console.log('✅ Room found:', roomStatus);
+        
+        // If we have a player name stored, try to join
+        const storedPlayerName = localStorage.getItem('playerName');
+        if (storedPlayerName) {
+          setPlayerName(storedPlayerName);
+          await joinRoom(roomCode);
+        } else {
+          // Room exists but no player name, stay in lobby
+          setError(`Room ${roomCode} exists. Please enter your name to join.`);
+        }
+      } else {
+        console.log('❌ Room not found:', roomCode);
+        setError(`Room ${roomCode} not found.`);
+      }
+    } catch (error) {
+      console.error('❌ Error checking room:', error);
+      setError(`Error checking room: ${error.message}`);
+    }
+  }, []); // No dependencies needed since API_URL is constant
+
+  useEffect(() => {
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '') {
+      const roomCode = pathParts[1];
+      console.log('🔍 Found room code in URL:', roomCode);
+      
+      // Check if room exists and try to join
+      checkRoomAndJoin(roomCode);
+    }
+  }, [checkRoomAndJoin]);
+
+  useEffect(() => {
+    console.log('🔗 Checking API connectivity at:', API_URL);
+    console.log('🌍 Environment:', process.env.NODE_ENV);
+    
+    // Check if the backend is accessible
+    const checkBackendHealth = async () => {
+      try {
+        console.log('🏥 Checking backend health at:', `${API_URL}/api/health`);
+        const response = await fetch(`${API_URL}/api/health`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+          const healthData = await response.json();
+          console.log('✅ Backend health check passed:', healthData);
+          setIsConnected(true);
+          setIsConnecting(false);
+          setError('');
+          addNotification('Connected to server successfully!', 'success', 3000);
+        } else {
+          console.error('❌ Backend health check failed:', response.status, response.statusText);
+          setIsConnected(false);
+          setIsConnecting(false);
+          setError(`Backend health check failed: ${response.status} ${response.statusText}`);
+        }
+      } catch (healthError) {
+        console.error('❌ Backend health check error:', healthError);
+        setIsConnected(false);
+        setIsConnecting(false);
+        
+        let errorMessage = 'Failed to connect to server. ';
+        if (healthError.message) {
+          errorMessage += `Error: ${healthError.message}. `;
+        }
+        if (healthError.code === 'ECONNREFUSED') {
+          errorMessage += 'Server is not running or not accessible.';
+        } else if (healthError.code === 'ENOTFOUND') {
+          errorMessage += 'Server domain not found. Check if backend is deployed.';
+        } else if (healthError.code === 'ETIMEDOUT') {
+          errorMessage += 'Connection timed out. Server might be overloaded.';
+        } else if (healthError.code === 'ERR_NETWORK') {
+          errorMessage += 'Network error. Check your internet connection.';
+        } else {
+          errorMessage += `Connection failed (Code: ${healthError.code || 'Unknown'}).`;
+        }
+        
+        setError(errorMessage);
+        addNotification(errorMessage, 'error');
+      }
+    };
+    
+    checkBackendHealth();
+  }, [addNotification]);
 
   const startRoomPolling = (roomCode) => {
     // Clear any existing polling
