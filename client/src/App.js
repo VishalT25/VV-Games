@@ -145,7 +145,9 @@ function App() {
         const storedPlayerName = localStorage.getItem('playerName');
         if (storedPlayerName) {
           setPlayerName(storedPlayerName);
-          await joinRoom(roomCode);
+          // Instead of calling joinRoom directly, we'll set the state to trigger a re-render
+          // and the useEffect will handle the room joining
+          setError(`Room ${roomCode} exists. Please refresh the page to join.`);
         } else {
           // Room exists but no player name, stay in lobby
           setError(`Room ${roomCode} exists. Please enter your name to join.`);
@@ -158,7 +160,17 @@ function App() {
       console.error('❌ Error checking room:', error);
       setError(`Error checking room: ${error.message}`);
     }
-  }, []); // No dependencies needed since API_URL is constant
+  }, []); // No dependencies needed
+
+  // Handle room joining when player name is available
+  useEffect(() => {
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length === 2 && pathParts[1] && pathParts[1] !== '' && playerName) {
+      const roomCode = pathParts[1];
+      console.log('🔍 Player name available, joining room:', roomCode);
+      joinRoom(roomCode);
+    }
+  }, [playerName]);
 
   useEffect(() => {
     const pathParts = window.location.pathname.split('/');
@@ -166,7 +178,7 @@ function App() {
       const roomCode = pathParts[1];
       console.log('🔍 Found room code in URL:', roomCode);
       
-      // Check if room exists and try to join
+      // Check if room exists
       checkRoomAndJoin(roomCode);
     }
   }, [checkRoomAndJoin]);
