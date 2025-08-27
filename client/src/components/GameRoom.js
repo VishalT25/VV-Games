@@ -6,7 +6,9 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
     roomData: roomData?.code, 
     playerName,
     playerId,
-    gamePhase: 'waiting'
+    gamePhase: 'waiting',
+    players: roomData?.players,
+    playerCount: roomData?.players?.length
   });
   
   const [gamePhase, setGamePhase] = useState('waiting'); // waiting, hint-giving, decision, voting, imposter-guess, finished
@@ -107,7 +109,11 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(finalSettings),
+      body: JSON.stringify({
+        roomCode: roomData.code,
+        playerId: playerId,
+        settings: finalSettings
+      }),
     })
     .then(response => response.json())
     .then(data => {
@@ -150,7 +156,10 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ hint: hint.trim() }),
+      body: JSON.stringify({ 
+        hint: hint.trim(),
+        playerId: playerId
+      }),
     })
     .then(response => response.json())
     .then(data => {
@@ -203,7 +212,13 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   };
 
   const continueHints = () => {
-    fetch(`${apiUrl}/decision-continue-hints`)
+    fetch(`${apiUrl}/decision-continue-hints`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ playerId: playerId }),
+    })
     .then(response => response.json())
     .then(data => {
       setGamePhase(data.phase);
@@ -217,7 +232,13 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   };
 
   const startVoting = () => {
-    fetch(`${apiUrl}/decision-start-voting`)
+    fetch(`${apiUrl}/decision-start-voting`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ playerId: playerId }),
+    })
     .then(response => response.json())
     .then(data => {
       setGamePhase(data.phase);
@@ -236,7 +257,10 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ guess: imposterGuess.trim() }),
+      body: JSON.stringify({ 
+        guess: imposterGuess.trim(),
+        playerId: playerId
+      }),
     })
     .then(response => response.json())
     .then(data => {
@@ -254,7 +278,10 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ newHostId }),
+      body: JSON.stringify({ 
+        newHostId,
+        playerId: playerId
+      }),
     })
     .then(response => response.json())
     .then(data => {
@@ -279,7 +306,10 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ settings: pendingSettings }),
+        body: JSON.stringify({ 
+          settings: pendingSettings,
+          playerId: playerId
+        }),
       })
       .then(response => response.json())
       .then(data => {
@@ -343,7 +373,10 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ customOrder: playerIndices }),
+        body: JSON.stringify({ 
+          customOrder: playerIndices,
+          playerId: playerId
+        }),
       })
       .then(response => response.json())
       .then(data => {
@@ -373,13 +406,16 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
     setShowLeaveConfirm(false);
   };
 
-  const kickPlayer = (playerId) => {
+  const kickPlayer = (targetPlayerId) => {
     fetch(`${apiUrl}/kick-player`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ playerId }),
+      body: JSON.stringify({ 
+        playerId: playerId,
+        targetPlayerId: targetPlayerId
+      }),
     })
     .then(response => response.json())
     .then(data => {

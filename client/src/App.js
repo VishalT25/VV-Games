@@ -51,7 +51,17 @@ function App() {
         const response = await fetch(`${API_URL}/api/room/${roomCode}/poll`);
         if (response.ok) {
           const roomStatus = await response.json();
-          setRoomData(roomStatus);
+          console.log('📡 Polling response:', roomStatus);
+          // Ensure we have the complete room data structure
+          const completeRoomData = {
+            ...roomStatus,
+            code: roomStatus.code,
+            players: roomStatus.players || [],
+            gameState: roomStatus.gameState || 'waiting',
+            gameData: roomStatus.gameData || null
+          };
+          console.log('🔄 Updated room data:', completeRoomData);
+          setRoomData(completeRoomData);
         }
       } catch (error) {
         console.error('❌ Polling error:', error);
@@ -88,9 +98,19 @@ function App() {
       
       const data = await response.json();
       console.log('✅ Joined room successfully:', data);
+      console.log('📊 Room data structure:', data.room);
       
       setPlayerId(data.playerId);
-      setRoomData(data.room);
+      // Ensure we have the complete room data structure
+      const completeRoomData = {
+        ...data.room,
+        code: data.room.code,
+        players: data.room.players || [],
+        gameState: data.room.gameState || 'waiting',
+        gameData: data.room.gameData || null
+      };
+      console.log('🔧 Complete room data:', completeRoomData);
+      setRoomData(completeRoomData);
       setGameState('room');
       setError('');
       

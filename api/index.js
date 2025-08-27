@@ -54,9 +54,10 @@ app.post('/api/create-room', (req, res) => {
     const room = {
       id: uuidv4(),
       code: roomCode,
-      gameType: 'word-game',
+      gameType: 'oddword',
       players: [],
       gameState: 'waiting',
+      gameData: null,
       createdAt: new Date(),
       lastActivity: Date.now()
     };
@@ -104,7 +105,8 @@ app.post('/api/join-room', (req, res) => {
       playerCount: room.players.length,
       gameState: room.gameState,
       gameType: room.gameType,
-      players: room.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost }))
+      players: room.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost })),
+      gameData: room.gameData
     }
   });
 });
@@ -123,21 +125,28 @@ app.get('/api/room/:code/status', (req, res) => {
     gameState: room.gameState,
     gameType: room.gameType,
     players: room.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost })),
+    gameData: room.gameData,
     lastActivity: room.lastActivity
   });
 });
 
-app.post('/api/room/:code/start-game', (req, res) => {
-  const { code } = req.params;
-  const { playerId } = req.body;
+// Game management endpoints
+app.post('/start-game', (req, res) => {
+  const { roomCode, playerId, settings } = req.body;
+  console.log(`Start game requested for room: ${roomCode}`);
   
-  const room = rooms.get(code);
+  // Find room by player ID
+  const player = players.get(playerId);
+  if (!player) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  const room = rooms.get(player.roomCode);
   if (!room) {
     return res.status(404).json({ error: 'Room not found' });
   }
   
-  const player = room.players.find(p => p.id === playerId);
-  if (!player || !player.isHost) {
+  if (!room.players.find(p => p.id === playerId)?.isHost) {
     return res.status(403).json({ error: 'Only the host can start the game' });
   }
   
@@ -145,53 +154,352 @@ app.post('/api/room/:code/start-game', (req, res) => {
     return res.status(400).json({ error: 'Need at least 3 players to start' });
   }
   
-  // Initialize game
+  // Initialize game data
+  const normalWord = 'apple';
+  const oddWord = 'banana';
+  const oddOneOutIndex = Math.floor(Math.random() * room.players.length);
+  
+  // Create turn order
+  let turnOrder = room.players.map(p => p.name);
+  if (settings?.playerOrder === 'host-set' && settings?.customOrder) {
+    turnOrder = settings.customOrder.map(index => room.players[index]?.name).filter(Boolean);
+  } else {
+    // Randomize turn order
+    for (let i = turnOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [turnOrder[i], turnOrder[j]] = [turnOrder[j], turnOrder[i]];
+    }
+  }
+  
   room.gameState = 'playing';
   room.gameData = {
-    normalWord: 'apple',
-    oddWord: 'banana',
-    oddOneOutIndex: Math.floor(Math.random() * room.players.length),
-    currentTurn: 0,
+    phase: 'hint-giving',
+    normalWord,
+    oddWord,
+    oddOneOutIndex,
+    currentTurnIndex: 0,
+    turnOrder,
     hints: [],
-    phase: 'hint-giving'
+    roundNumber: 1,
+    timer: settings?.timerDuration || 30000,
+    settings: settings || {
+      timerDuration: 30000,
+      imposterKnowsRole: false,
+      playerOrder: 'random'
+    }
   };
   
   room.lastActivity = Date.now();
   
+  // Return game data for each player
+  const currentPlayer = room.players.find(p => p.id === playerId);
+  const isOddOneOut = room.players.indexOf(currentPlayer) === oddOneOutIndex;
+  
   res.json({
     success: true,
-    gameData: room.gameData,
-    message: 'Game started successfully'
+    word: isOddOneOut ? oddWord : normalWord,
+    isOddOneOut,
+    knowsRole: settings?.imposterKnowsRole || false,
+    turnOrder,
+    currentTurnIndex: 0,
+    timer: room.gameData.timer,
+    settings: room.gameData.settings
   });
 });
 
-app.post('/api/room/:code/give-hint', (req, res) => {
-  const { code } = req.params;
-  const { playerId, hint } = req.body;
+app.post('/give-hint', (req, res) => {
+  const { hint, playerId } = req.body;
+  console.log(`Hint submitted by player: ${playerId}`);
   
-  const room = rooms.get(code);
-  if (!room || room.gameState !== 'playing') {
-    return res.status(400).json({ error: 'Game not in progress' });
-  }
-  
-  const player = room.players.find(p => p.id === playerId);
+  const player = players.get(playerId);
   if (!player) {
     return res.status(404).json({ error: 'Player not found' });
   }
   
+  const room = rooms.get(player.roomCode);
+  if (!room || room.gameState !== 'playing') {
+    return res.status(400).json({ error: 'Game not in progress' });
+  }
+  
+  const roomPlayer = room.players.find(p => p.id === playerId);
+  if (!roomPlayer) {
+    return res.status(404).json({ error: 'Player not in room' });
+  }
+  
   // Add hint
-  room.gameData.hints.push({
+  const hintData = {
     playerId,
-    playerName: player.name,
+    playerName: roomPlayer.name,
     hint,
+    playerIndex: room.players.indexOf(roomPlayer),
     timestamp: Date.now()
+  };
+  
+  room.gameData.hints.push(hintData);
+  room.lastActivity = Date.now();
+  
+  // Check if all players have given hints
+  if (room.gameData.hints.length >= room.players.length) {
+    room.gameData.phase = 'decision';
+  } else {
+    // Move to next player
+    room.gameData.currentTurnIndex = (room.gameData.currentTurnIndex + 1) % room.players.length;
+  }
+  
+  res.json({
+    success: true,
+    ...hintData
   });
+});
+
+app.post('/decision-continue-hints', (req, res) => {
+  const { playerId } = req.body;
+  console.log(`Continue hints requested by player: ${playerId}`);
+  
+  const player = players.get(playerId);
+  if (!player) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  const room = rooms.get(player.roomCode);
+  if (!room || room.gameState !== 'playing') {
+    return res.status(400).json({ error: 'Game not in progress' });
+  }
+  
+  if (!room.players.find(p => p.id === playerId)?.isHost) {
+    return res.status(403).json({ error: 'Only the host can continue hints' });
+  }
+  
+  room.gameData.phase = 'hint-giving';
+  room.gameData.currentTurnIndex = 0;
+  room.gameData.roundNumber++;
+  room.gameData.hints = [];
+  room.lastActivity = Date.now();
+  
+  res.json({
+    success: true,
+    phase: room.gameData.phase,
+    currentTurnIndex: room.gameData.currentTurnIndex,
+    timer: room.gameData.timer,
+    roundNumber: room.gameData.roundNumber
+  });
+});
+
+app.post('/decision-start-voting', (req, res) => {
+  const { playerId } = req.body;
+  console.log(`Start voting requested by player: ${playerId}`);
+  
+  const player = players.get(playerId);
+  if (!player) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  const room = rooms.get(player.roomCode);
+  if (!room || room.gameState !== 'playing') {
+    return res.status(400).json({ error: 'Game not in progress' });
+  }
+  
+  if (!room.players.find(p => p.id === playerId)?.isHost) {
+    return res.status(403).json({ error: 'Only the host can start voting' });
+  }
+  
+  room.gameData.phase = 'voting';
+  room.gameData.timer = 30000; // 30 seconds for voting
+  room.lastActivity = Date.now();
+  
+  res.json({
+    success: true,
+    phase: room.gameData.phase,
+    timer: room.gameData.timer
+  });
+});
+
+app.post('/imposter-guess', (req, res) => {
+  const { guess, playerId } = req.body;
+  console.log(`Imposter guess submitted by player: ${playerId}`);
+  
+  const player = players.get(playerId);
+  if (!player) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  const room = rooms.get(player.roomCode);
+  if (!room || room.gameState !== 'playing') {
+    return res.status(400).json({ error: 'Game not in progress' });
+  }
+  
+  const roomPlayer = room.players.find(p => p.id === playerId);
+  if (!roomPlayer) {
+    return res.status(404).json({ error: 'Player not in room' });
+  }
+  
+  const isOddOneOut = room.players.indexOf(roomPlayer) === room.gameData.oddOneOutIndex;
+  
+  if (!isOddOneOut) {
+    return res.status(400).json({ error: 'Only the imposter can submit a guess' });
+  }
+  
+  // Determine game result
+  const correctWord = room.gameData.normalWord;
+  const oddWord = room.gameData.oddWord;
+  const isCorrect = guess.toLowerCase() === correctWord.toLowerCase();
+  
+  const gameResult = {
+    winner: isCorrect ? 'imposter' : 'majority',
+    reason: isCorrect ? 'imposter-correct-guess' : 'imposter-wrong-guess',
+    imposterName: roomPlayer.name,
+    correctWord,
+    oddWord,
+    imposterGuess: guess,
+    allHints: room.gameData.hints
+  };
+  
+  room.gameData.phase = 'finished';
+  room.gameData.gameResult = gameResult;
+  room.lastActivity = Date.now();
+  
+  res.json(gameResult);
+});
+
+// Player management endpoints
+app.post('/kick-player', (req, res) => {
+  const { playerId, targetPlayerId } = req.body;
+  console.log(`Kick player requested: ${playerId} -> ${targetPlayerId}`);
+  
+  const player = players.get(playerId);
+  if (!player) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  const room = rooms.get(player.roomCode);
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  
+  if (!room.players.find(p => p.id === playerId)?.isHost) {
+    return res.status(403).json({ error: 'Only the host can kick players' });
+  }
+  
+  if (playerId === targetPlayerId) {
+    return res.status(400).json({ error: 'Cannot kick yourself' });
+  }
+  
+  // Remove player from room
+  const targetPlayerIndex = room.players.findIndex(p => p.id === targetPlayerId);
+  if (targetPlayerIndex === -1) {
+    return res.status(404).json({ error: 'Target player not found in room' });
+  }
+  
+  const removedPlayer = room.players.splice(targetPlayerIndex, 1)[0];
+  players.delete(targetPlayerId);
+  
+  // If the removed player was the host, transfer host to the first remaining player
+  if (removedPlayer.isHost && room.players.length > 0) {
+    room.players[0].isHost = true;
+  }
   
   room.lastActivity = Date.now();
   
   res.json({
     success: true,
-    hint: { playerId, playerName: player.name, hint, timestamp: Date.now() }
+    players: room.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost }))
+  });
+});
+
+app.post('/transfer-host', (req, res) => {
+  const { playerId, newHostId } = req.body;
+  console.log(`Transfer host requested: ${playerId} -> ${newHostId}`);
+  
+  const player = players.get(playerId);
+  if (!player) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  const room = rooms.get(player.roomCode);
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  
+  if (!room.players.find(p => p.id === playerId)?.isHost) {
+    return res.status(403).json({ error: 'Only the host can transfer host' });
+  }
+  
+  const newHost = room.players.find(p => p.id === newHostId);
+  if (!newHost) {
+    return res.status(404).json({ error: 'New host not found in room' });
+  }
+  
+  // Transfer host
+  room.players.forEach(p => p.isHost = false);
+  newHost.isHost = true;
+  
+  room.lastActivity = Date.now();
+  
+  res.json({
+    success: true,
+    players: room.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost }))
+  });
+});
+
+app.post('/update-game-settings', (req, res) => {
+  const { playerId, settings } = req.body;
+  console.log(`Update game settings requested by player: ${playerId}`);
+  
+  const player = players.get(playerId);
+  if (!player) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  const room = rooms.get(player.roomCode);
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  
+  if (!room.players.find(p => p.id === playerId)?.isHost) {
+    return res.status(403).json({ error: 'Only the host can update settings' });
+  }
+  
+  // Update settings
+  if (room.gameData) {
+    room.gameData.settings = { ...room.gameData.settings, ...settings };
+  }
+  
+  room.lastActivity = Date.now();
+  
+  res.json({
+    success: true,
+    settings: room.gameData?.settings || settings
+  });
+});
+
+app.post('/set-player-order', (req, res) => {
+  const { playerId, customOrder } = req.body;
+  console.log(`Set player order requested by player: ${playerId}`);
+  
+  const player = players.get(playerId);
+  if (!player) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  const room = rooms.get(player.roomCode);
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  
+  if (!room.players.find(p => p.id === playerId)?.isHost) {
+    return res.status(403).json({ error: 'Only the host can set player order' });
+  }
+  
+  // Update player order in game data
+  if (room.gameData) {
+    room.gameData.customPlayerOrder = customOrder;
+  }
+  
+  room.lastActivity = Date.now();
+  
+  res.json({
+    success: true,
+    players: room.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost }))
   });
 });
 
@@ -237,9 +545,16 @@ app.get('*', (req, res) => {
       'POST /api/create-room',
       'POST /api/join-room',
       'GET /api/room/:code/status',
-      'POST /api/room/:code/start-game',
-      'POST /api/room/:code/give-hint',
-      'GET /api/room/:code/poll'
+      'GET /api/room/:code/poll',
+      'POST /start-game',
+      'POST /give-hint',
+      'POST /decision-continue-hints',
+      'POST /decision-start-voting',
+      'POST /imposter-guess',
+      'POST /kick-player',
+      'POST /transfer-host',
+      'POST /update-game-settings',
+      'POST /set-player-order'
     ]
   });
 });
