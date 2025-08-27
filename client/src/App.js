@@ -5,10 +5,12 @@ import Notification from './components/Notification';
 import './styles/App.css';
 
 const API_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://vv-games-vishalt25.vercel.app' 
+  ? window.location.origin 
   : 'http://localhost:3001';
 
 console.log('🔗 API URL:', API_URL);
+console.log('🌍 Current origin:', window.location.origin);
+console.log('🔧 Environment:', process.env.NODE_ENV);
 
 function App() {
   const [gameState, setGameState] = useState('lobby'); // lobby, room, playing
