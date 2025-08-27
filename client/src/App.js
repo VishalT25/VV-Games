@@ -22,7 +22,6 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [playerId, setPlayerId] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
-  const [pendingRoomCode, setPendingRoomCode] = useState(null);
 
   const addNotification = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now();
@@ -77,7 +76,7 @@ function App() {
       localStorage.setItem('playerName', playerName.trim());
       
       // Now join the room
-      await joinRoom(data.roomCode);
+      await joinRoomDirectly(data.roomCode, playerName.trim());
       
     } catch (error) {
       console.error('❌ Error creating room:', error);
@@ -94,11 +93,12 @@ function App() {
         const roomStatus = await response.json();
         console.log('✅ Room found:', roomStatus);
         
-        // If we have a player name stored, try to join
+        // If we have a player name stored, join the room directly
         const storedPlayerName = localStorage.getItem('playerName');
         if (storedPlayerName) {
           setPlayerName(storedPlayerName);
-          setPendingRoomCode(roomCode); // Set pending room to join
+          // Join the room directly here instead of using useEffect
+          await joinRoomDirectly(roomCode, storedPlayerName);
         } else {
           // Room exists but no player name, stay in lobby
           setError(`Room ${roomCode} exists. Please enter your name to join.`);
@@ -113,21 +113,17 @@ function App() {
     }
   }, []); // No dependencies needed
 
-  const joinRoom = async (roomCode) => {
-    console.log('🎯 joinRoom called with code:', roomCode);
+  // Direct room joining function to avoid useEffect dependencies
+  const joinRoomDirectly = async (roomCode, playerNameToUse) => {
+    console.log('🎯 joinRoomDirectly called with code:', roomCode);
     
-    if (!playerName.trim()) {
-      setError('Please enter your name');
-      return;
-    }
-
     try {
       const response = await fetch(`${API_URL}/api/join-room`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           roomCode: roomCode,
-          playerName: playerName.trim()
+          playerName: playerNameToUse
         })
       });
       
@@ -146,7 +142,7 @@ function App() {
       addNotification(`Joined room ${roomCode}!`, 'success', 3000);
       
       // Store player name for future use
-      localStorage.setItem('playerName', playerName.trim());
+      localStorage.setItem('playerName', playerNameToUse);
       
       // Update URL to show room code
       window.history.pushState({}, '', `/${roomCode}`);
@@ -207,15 +203,6 @@ function App() {
     
     addNotification('Left the room', 'info');
   };
-
-  // Handle room joining when player name is available and there's a pending room
-  useEffect(() => {
-    if (pendingRoomCode && playerName) {
-      console.log('🔍 Player name available, joining pending room:', pendingRoomCode);
-      joinRoom(pendingRoomCode);
-      setPendingRoomCode(null); // Clear pending room
-    }
-  }, [pendingRoomCode, playerName]);
 
   useEffect(() => {
     const pathParts = window.location.pathname.split('/');
@@ -337,7 +324,7 @@ function App() {
             playerName={playerName}
             setPlayerName={setPlayerName}
             createRoom={createRoom}
-            joinRoom={joinRoom}
+            joinRoom={joinRoomDirectly}
             error={error}
             setError={setError}
             isConnected={isConnected}
