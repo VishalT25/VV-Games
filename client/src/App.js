@@ -199,12 +199,12 @@ function App() {
     setPollingInterval(interval);
   };
 
-  const stopRoomPolling = () => {
+  const stopRoomPolling = useCallback(() => {
     if (pollingInterval) {
       clearInterval(pollingInterval);
       setPollingInterval(null);
     }
-  };
+  }, [pollingInterval]);
 
   // Cleanup polling on unmount
   useEffect(() => {
