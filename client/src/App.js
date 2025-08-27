@@ -207,8 +207,8 @@ function App() {
           // Don't update URL since we're already on this URL
           await joinRoomDirectly(roomCode, storedPlayerName, false);
         } else {
-          // Room exists but no player name, stay in lobby
-          setError(`Room ${roomCode} exists. Please enter your name to join.`);
+          // Room exists but no player name, show the room code and let user enter name
+          setError(`Room ${roomCode} exists. Please enter your name above and click "Join Room" to join.`);
         }
       } else {
         console.log('❌ Room not found:', roomCode);

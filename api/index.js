@@ -131,7 +131,7 @@ app.get('/api/room/:code/status', (req, res) => {
 });
 
 // Game management endpoints
-app.post('/start-game', (req, res) => {
+app.post('/api/start-game', (req, res) => {
   const { roomCode, playerId, settings } = req.body;
   console.log(`Start game requested for room: ${roomCode}`);
   
@@ -207,7 +207,7 @@ app.post('/start-game', (req, res) => {
   });
 });
 
-app.post('/give-hint', (req, res) => {
+app.post('/api/give-hint', (req, res) => {
   const { hint, playerId } = req.body;
   console.log(`Hint submitted by player: ${playerId}`);
   
@@ -252,7 +252,7 @@ app.post('/give-hint', (req, res) => {
   });
 });
 
-app.post('/decision-continue-hints', (req, res) => {
+app.post('/api/decision-continue-hints', (req, res) => {
   const { playerId } = req.body;
   console.log(`Continue hints requested by player: ${playerId}`);
   
@@ -285,7 +285,7 @@ app.post('/decision-continue-hints', (req, res) => {
   });
 });
 
-app.post('/decision-start-voting', (req, res) => {
+app.post('/api/decision-start-voting', (req, res) => {
   const { playerId } = req.body;
   console.log(`Start voting requested by player: ${playerId}`);
   
@@ -314,7 +314,7 @@ app.post('/decision-start-voting', (req, res) => {
   });
 });
 
-app.post('/imposter-guess', (req, res) => {
+app.post('/api/imposter-guess', (req, res) => {
   const { guess, playerId } = req.body;
   console.log(`Imposter guess submitted by player: ${playerId}`);
   
@@ -362,7 +362,7 @@ app.post('/imposter-guess', (req, res) => {
 });
 
 // Player management endpoints
-app.post('/kick-player', (req, res) => {
+app.post('/api/kick-player', (req, res) => {
   const { playerId, targetPlayerId } = req.body;
   console.log(`Kick player requested: ${playerId} -> ${targetPlayerId}`);
   
@@ -406,7 +406,7 @@ app.post('/kick-player', (req, res) => {
   });
 });
 
-app.post('/transfer-host', (req, res) => {
+app.post('/api/transfer-host', (req, res) => {
   const { playerId, newHostId } = req.body;
   console.log(`Transfer host requested: ${playerId} -> ${newHostId}`);
   
@@ -441,7 +441,7 @@ app.post('/transfer-host', (req, res) => {
   });
 });
 
-app.post('/update-game-settings', (req, res) => {
+app.post('/api/update-game-settings', (req, res) => {
   const { playerId, settings } = req.body;
   console.log(`Update game settings requested by player: ${playerId}`);
   
@@ -472,7 +472,7 @@ app.post('/update-game-settings', (req, res) => {
   });
 });
 
-app.post('/set-player-order', (req, res) => {
+app.post('/api/set-player-order', (req, res) => {
   const { playerId, customOrder } = req.body;
   console.log(`Set player order requested by player: ${playerId}`);
   
@@ -546,15 +546,15 @@ app.get('*', (req, res) => {
       'POST /api/join-room',
       'GET /api/room/:code/status',
       'GET /api/room/:code/poll',
-      'POST /start-game',
-      'POST /give-hint',
-      'POST /decision-continue-hints',
-      'POST /decision-start-voting',
-      'POST /imposter-guess',
-      'POST /kick-player',
-      'POST /transfer-host',
-      'POST /update-game-settings',
-      'POST /set-player-order'
+      'POST /api/start-game',
+      'POST /api/give-hint',
+      'POST /api/decision-continue-hints',
+      'POST /api/decision-start-voting',
+      'POST /api/imposter-guess',
+      'POST /api/kick-player',
+      'POST /api/transfer-host',
+      'POST /api/update-game-settings',
+      'POST /api/set-player-order'
     ]
   });
 });

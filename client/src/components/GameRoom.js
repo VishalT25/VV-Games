@@ -104,7 +104,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
     }
     
     console.log('📡 Emitting start-game event with settings:', finalSettings);
-    fetch(`${apiUrl}/start-game`, {
+    fetch(`${apiUrl}/api/start-game`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -151,7 +151,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
     e.preventDefault();
     if (!hint.trim()) return;
     
-    fetch(`${apiUrl}/give-hint`, {
+    fetch(`${apiUrl}/api/give-hint`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -212,7 +212,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   };
 
   const continueHints = () => {
-    fetch(`${apiUrl}/decision-continue-hints`, {
+    fetch(`${apiUrl}/api/decision-continue-hints`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -232,7 +232,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   };
 
   const startVoting = () => {
-    fetch(`${apiUrl}/decision-start-voting`, {
+    fetch(`${apiUrl}/api/decision-start-voting`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -252,7 +252,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   const submitImposterGuess = (e) => {
     e.preventDefault();
     if (!imposterGuess.trim()) return;
-    fetch(`${apiUrl}/imposter-guess`, {
+    fetch(`${apiUrl}/api/imposter-guess`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -273,7 +273,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   };
 
   const transferHost = (newHostId) => {
-    fetch(`${apiUrl}/transfer-host`, {
+    fetch(`${apiUrl}/api/transfer-host`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -301,7 +301,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   const saveSettings = () => {
     if (pendingSettings) {
       setGameSettings(pendingSettings);
-      fetch(`${apiUrl}/update-game-settings`, {
+      fetch(`${apiUrl}/api/update-game-settings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -368,7 +368,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
         const playerIndex = roomData.players.findIndex(p => p.id === playerId);
         return playerIndex;
       });
-      fetch(`${apiUrl}/set-player-order`, {
+      fetch(`${apiUrl}/api/set-player-order`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -407,7 +407,7 @@ function GameRoom({ roomData, setRoomData, playerName, setGameState, playerId, a
   };
 
   const kickPlayer = (targetPlayerId) => {
-    fetch(`${apiUrl}/kick-player`, {
+    fetch(`${apiUrl}/api/kick-player`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
