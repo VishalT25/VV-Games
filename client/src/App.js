@@ -6,7 +6,7 @@ import Notification from './components/Notification';
 import './styles/App.css';
 
 const SOCKET_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://vv-games-vishalt25.vercel.app' 
+  ? 'https://vv-games.vercel.app' 
   : 'http://localhost:3001';
 
 console.log('🔗 Connecting to:', SOCKET_URL);
