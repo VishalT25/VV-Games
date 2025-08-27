@@ -6,7 +6,7 @@ import Notification from './components/Notification';
 import './styles/App.css';
 
 const SOCKET_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://vv-games.vercel.app' 
+  ? 'https://vv-games-vishalt25.vercel.app' 
   : 'http://localhost:3001';
 
 console.log('🔗 Connecting to:', SOCKET_URL);
@@ -58,14 +58,63 @@ function App() {
         }
       } catch (healthError) {
         console.error('❌ Backend health check error:', healthError);
+        
+        // Try alternative URL if the main one fails
+        if (SOCKET_URL.includes('vv-games-vishalt25.vercel.app')) {
+          const alternativeUrl = 'https://vv-games.vercel.app';
+          console.log('🔄 Trying alternative URL:', alternativeUrl);
+          try {
+            const altResponse = await fetch(`${alternativeUrl}/api/health`);
+            if (altResponse.ok) {
+              console.log('✅ Alternative backend health check passed');
+              // Update SOCKET_URL to use the working alternative
+              window.SOCKET_URL_FALLBACK = alternativeUrl;
+            }
+          } catch (altError) {
+            console.error('❌ Alternative backend also failed:', altError);
+          }
+        }
       }
     };
     
     checkBackendHealth();
     
     const newSocket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
+      timeout: 20000,
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      maxReconnectionAttempts: 5
     });
+
+    // If we have a fallback URL, try connecting to it as well
+    if (window.SOCKET_URL_FALLBACK) {
+      console.log('🔄 Attempting fallback connection to:', window.SOCKET_URL_FALLBACK);
+      const fallbackSocket = io(window.SOCKET_URL_FALLBACK, {
+        transports: ['websocket', 'polling'],
+        timeout: 20000,
+        forceNew: true
+      });
+      
+      fallbackSocket.on('connect', () => {
+        console.log('✅ Fallback connection successful');
+        // Use the fallback socket instead
+        newSocket.close();
+        setSocket(fallbackSocket);
+        setIsConnected(true);
+        setIsConnecting(false);
+        setError('');
+        addNotification('Connected via fallback server!', 'success', 3000);
+      });
+      
+      fallbackSocket.on('connect_error', (fallbackError) => {
+        console.error('❌ Fallback connection also failed:', fallbackError);
+        fallbackSocket.close();
+      });
+    }
 
     setIsConnecting(true);
 
