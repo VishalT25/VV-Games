@@ -211,7 +211,7 @@ function App() {
     return () => {
       stopRoomPolling();
     };
-  }, []);
+  }, [stopRoomPolling]);
 
   return (
     <div className="App">
